@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 from llmtg.cards.models import Card
 from llmtg.cards.provider import CardNotFoundError
 
-BULK_METADATA_URL = "https://api.scryfall.com/bulk-data/oracle-cards"
+BULK_METADATA_URL = "https://api.scryfall.com/bulk-data/oracle_cards"
 DEFAULT_BULK_PATH = Path("data/scryfall/oracle-cards.json")
 
 
@@ -60,14 +60,24 @@ def ensure_oracle_bulk_data(
             return destination
 
     metadata = _download_json(BULK_METADATA_URL)
-    if not isinstance(metadata, dict) or "download_uri" not in metadata:
-        raise BulkDataError("Scryfall bulk-data metadata did not include a download_uri")
+    if not isinstance(metadata, dict):
+        raise BulkDataError("Scryfall bulk-data metadata was not a JSON object")
 
-    download_uri = str(metadata["download_uri"])
+    download_uri = metadata.get("download_uri")
+    if not download_uri:
+        object_type = metadata.get("object")
+        details = metadata.get("details")
+        suffix = ""
+        if object_type or details:
+            suffix = f" (object={object_type!r}, details={details!r})"
+        raise BulkDataError(
+            "Scryfall Oracle Cards metadata did not include a download_uri" + suffix
+        )
+
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        with urlopen(_request(download_uri), timeout=180) as response:  # noqa: S310 - URI supplied by Scryfall
+        with urlopen(_request(str(download_uri)), timeout=180) as response:  # noqa: S310 - URI supplied by Scryfall
             destination.write_bytes(response.read())
     except HTTPError as exc:
         raise BulkDataError(f"Could not download Scryfall bulk data: HTTP {exc.code}") from exc
