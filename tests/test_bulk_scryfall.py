@@ -125,30 +125,21 @@ def test_bulk_provider_loads_current_gzipped_jsonl_format(tmp_path) -> None:
     assert provider.get_card("Goreclaw, Terror of Qal Sisma").can_be_commander
 
 
-def test_bulk_provider_prefers_a_commander_legal_printing() -> None:
-    provider = BulkScryfallProvider.from_file(_catalog_path_from_payloads(_card_payloads()))
+def test_bulk_provider_prefers_a_commander_legal_printing(tmp_path) -> None:
+    catalog = tmp_path / "default-cards.json"
+    _write_catalog(catalog)
+    provider = BulkScryfallProvider.from_file(catalog)
+
     assert provider.get_card("Llanowar Elves").commander_legal
 
 
-def test_bulk_provider_indexes_individual_card_face_names() -> None:
-    provider = BulkScryfallProvider.from_file(_catalog_path_from_payloads(_card_payloads()))
+def test_bulk_provider_indexes_individual_card_face_names(tmp_path) -> None:
+    catalog = tmp_path / "default-cards.json"
+    _write_catalog(catalog)
+    provider = BulkScryfallProvider.from_file(catalog)
+
     assert provider.get_card("Bala Ged Recovery").name == "Bala Ged Recovery // Bala Ged Sanctuary"
     assert provider.get_card("Bala Ged Sanctuary").commander_legal
-
-
-def _catalog_path_from_payloads(payloads: list[dict]):
-    # Avoid pytest fixtures in these compact behavioral tests by using a temporary file.
-    import tempfile
-    from pathlib import Path
-
-    handle = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
-    try:
-        json.dump(payloads, handle)
-        handle.close()
-        return Path(handle.name)
-    except Exception:
-        handle.close()
-        raise
 
 
 def test_bulk_provider_reports_missing_card(tmp_path) -> None:
