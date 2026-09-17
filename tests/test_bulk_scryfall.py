@@ -34,6 +34,37 @@ def _card_payloads() -> list[dict]:
             "color_identity": ["G"],
             "legalities": {"commander": "legal"},
         },
+        {
+            "id": "llanowar-upcoming",
+            "oracle_id": "llanowar-oracle",
+            "name": "Llanowar Elves",
+            "type_line": "Creature — Elf Druid",
+            "oracle_text": "{T}: Add {G}.",
+            "color_identity": ["G"],
+            "legalities": {"commander": "not_legal"},
+        },
+        {
+            "id": "llanowar-released",
+            "oracle_id": "llanowar-oracle",
+            "name": "Llanowar Elves",
+            "type_line": "Creature — Elf Druid",
+            "oracle_text": "{T}: Add {G}.",
+            "color_identity": ["G"],
+            "legalities": {"commander": "legal"},
+        },
+        {
+            "id": "bala-ged",
+            "oracle_id": "bala-ged-oracle",
+            "name": "Bala Ged Recovery // Bala Ged Sanctuary",
+            "type_line": "Sorcery // Land",
+            "oracle_text": "",
+            "color_identity": ["G"],
+            "legalities": {"commander": "legal"},
+            "card_faces": [
+                {"name": "Bala Ged Recovery"},
+                {"name": "Bala Ged Sanctuary"},
+            ],
+        },
     ]
 
 
@@ -48,15 +79,15 @@ def _write_jsonl_gz_catalog(path) -> None:
             handle.write("\n")
 
 
-def test_oracle_bulk_metadata_endpoint_uses_scryfall_type_slug() -> None:
-    assert BULK_METADATA_URL.endswith("/bulk-data/oracle_cards")
+def test_default_bulk_metadata_endpoint_uses_scryfall_type_slug() -> None:
+    assert BULK_METADATA_URL.endswith("/bulk-data/default_cards")
 
 
 def test_current_metadata_prefers_jsonl_download_uri() -> None:
     metadata = {
         "object": "bulk_data",
-        "type": "oracle_cards",
-        "jsonl_download_uri": "https://data.scryfall.io/oracle-cards/current.jsonl.gz",
+        "type": "default_cards",
+        "jsonl_download_uri": "https://data.scryfall.io/default-cards/current.jsonl.gz",
     }
     assert _download_uri_from_metadata(metadata).endswith("current.jsonl.gz")
 
@@ -64,14 +95,14 @@ def test_current_metadata_prefers_jsonl_download_uri() -> None:
 def test_legacy_metadata_still_accepts_download_uri() -> None:
     metadata = {
         "object": "bulk_data",
-        "type": "oracle_cards",
-        "download_uri": "https://data.scryfall.io/oracle-cards/current.json",
+        "type": "default_cards",
+        "download_uri": "https://data.scryfall.io/default-cards/current.json",
     }
     assert _download_uri_from_metadata(metadata).endswith("current.json")
 
 
 def test_bulk_provider_loads_cards_from_local_json_file(tmp_path) -> None:
-    catalog = tmp_path / "oracle-cards.json"
+    catalog = tmp_path / "default-cards.json"
     _write_catalog(catalog)
 
     provider = BulkScryfallProvider.from_file(catalog)
@@ -85,7 +116,7 @@ def test_bulk_provider_loads_cards_from_local_json_file(tmp_path) -> None:
 
 
 def test_bulk_provider_loads_current_gzipped_jsonl_format(tmp_path) -> None:
-    catalog = tmp_path / "oracle-cards.jsonl.gz"
+    catalog = tmp_path / "default-cards.jsonl.gz"
     _write_jsonl_gz_catalog(catalog)
 
     provider = BulkScryfallProvider.from_file(catalog)
@@ -94,8 +125,34 @@ def test_bulk_provider_loads_current_gzipped_jsonl_format(tmp_path) -> None:
     assert provider.get_card("Goreclaw, Terror of Qal Sisma").can_be_commander
 
 
+def test_bulk_provider_prefers_a_commander_legal_printing() -> None:
+    provider = BulkScryfallProvider.from_file(_catalog_path_from_payloads(_card_payloads()))
+    assert provider.get_card("Llanowar Elves").commander_legal
+
+
+def test_bulk_provider_indexes_individual_card_face_names() -> None:
+    provider = BulkScryfallProvider.from_file(_catalog_path_from_payloads(_card_payloads()))
+    assert provider.get_card("Bala Ged Recovery").name == "Bala Ged Recovery // Bala Ged Sanctuary"
+    assert provider.get_card("Bala Ged Sanctuary").commander_legal
+
+
+def _catalog_path_from_payloads(payloads: list[dict]):
+    # Avoid pytest fixtures in these compact behavioral tests by using a temporary file.
+    import tempfile
+    from pathlib import Path
+
+    handle = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+    try:
+        json.dump(payloads, handle)
+        handle.close()
+        return Path(handle.name)
+    except Exception:
+        handle.close()
+        raise
+
+
 def test_bulk_provider_reports_missing_card(tmp_path) -> None:
-    catalog = tmp_path / "oracle-cards.json"
+    catalog = tmp_path / "default-cards.json"
     _write_catalog(catalog)
     provider = BulkScryfallProvider.from_file(catalog)
 
