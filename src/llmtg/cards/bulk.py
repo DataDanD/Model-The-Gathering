@@ -91,6 +91,17 @@ def ensure_default_bulk_data(
     return destination
 
 
+# Backward-compatible alias kept while callers migrate from the earlier
+# Oracle Cards implementation to Default Cards.
+def ensure_oracle_bulk_data(
+    path: str | Path = DEFAULT_BULK_PATH,
+    *,
+    max_age: timedelta = timedelta(days=1),
+    force: bool = False,
+) -> Path:
+    return ensure_default_bulk_data(path, max_age=max_age, force=force)
+
+
 def _card_from_payload(payload: dict) -> Card:
     return Card(
         name=payload["name"],
