@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from llmtg.cards.bulk import BulkDataError, BulkScryfallProvider
+from llmtg.cards.bulk import BULK_METADATA_URL, BulkDataError, BulkScryfallProvider
 from llmtg.cards.provider import CardNotFoundError
 
 
@@ -34,6 +34,10 @@ def _write_catalog(path) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def test_oracle_bulk_metadata_endpoint_uses_scryfall_type_slug() -> None:
+    assert BULK_METADATA_URL.endswith("/bulk-data/oracle_cards")
 
 
 def test_bulk_provider_loads_cards_from_local_file(tmp_path) -> None:
