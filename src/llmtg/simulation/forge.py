@@ -4,6 +4,7 @@ import json
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from llmtg.decks.models import Deck
@@ -14,6 +15,7 @@ from llmtg.simulation.forge_protocol import (
     build_game_request,
     parse_game_response,
 )
+from llmtg.simulation.forge_runtime import ForgeRuntimeConfig
 from llmtg.simulation.result import GameResult
 
 
@@ -44,6 +46,7 @@ class ForgeEngine(SimulationEngine):
 
     command: Sequence[str]
     timeout_seconds: float = 120.0
+    working_dir: str | Path | None = None
     runner: Runner = subprocess.run
 
     engine_id = "forge-bridge-v1"
@@ -54,6 +57,28 @@ class ForgeEngine(SimulationEngine):
             raise ForgeConfigurationError("Forge bridge command cannot be empty")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be greater than zero")
+        if self.working_dir is not None:
+            self.working_dir = Path(self.working_dir).expanduser().resolve()
+
+    @classmethod
+    def from_runtime_config(
+        cls,
+        config: ForgeRuntimeConfig,
+        *,
+        timeout_seconds: float = 120.0,
+        runner: Runner = subprocess.run,
+    ) -> "ForgeEngine":
+        command = config.bridge_command()
+        if command is None:
+            raise ForgeConfigurationError(
+                "No Forge bridge configured; set LLMTG_FORGE_BRIDGE"
+            )
+        return cls(
+            command=command,
+            timeout_seconds=timeout_seconds,
+            working_dir=config.working_dir,
+            runner=runner,
+        )
 
     def play_game(
         self,
@@ -72,6 +97,7 @@ class ForgeEngine(SimulationEngine):
                 capture_output=True,
                 timeout=self.timeout_seconds,
                 check=False,
+                cwd=str(self.working_dir) if self.working_dir is not None else None,
             )
         except FileNotFoundError as exc:
             raise ForgeConfigurationError(
