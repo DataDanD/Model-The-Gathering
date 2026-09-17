@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -17,7 +18,7 @@ def _default_fetch_json(url: str) -> dict:
         url,
         headers={
             "User-Agent": "Model-The-Gathering/0.1",
-            "Accept": "application/json",
+            "Accept": "application/json;q=0.9,*/*;q=0.8",
         },
     )
     try:
@@ -32,9 +33,22 @@ def _default_fetch_json(url: str) -> dict:
 class ScryfallProvider:
     base_url = "https://api.scryfall.com"
 
-    def __init__(self, fetch_json: JsonFetcher | None = None) -> None:
+    def __init__(
+        self,
+        fetch_json: JsonFetcher | None = None,
+        *,
+        minimum_interval_seconds: float = 0.1,
+    ) -> None:
         self._fetch_json = fetch_json or _default_fetch_json
         self._cache: dict[str, Card] = {}
+        self._minimum_interval_seconds = minimum_interval_seconds
+        self._last_request_at = 0.0
+
+    def _throttle(self) -> None:
+        elapsed = time.monotonic() - self._last_request_at
+        remaining = self._minimum_interval_seconds - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
 
     def get_card(self, name: str) -> Card:
         key = name.strip().casefold()
@@ -43,8 +57,10 @@ class ScryfallProvider:
         if key in self._cache:
             return self._cache[key]
 
+        self._throttle()
         url = f"{self.base_url}/cards/named?exact={quote(name.strip())}"
         payload = self._fetch_json(url)
+        self._last_request_at = time.monotonic()
         if payload.get("object") == "error":
             raise CardNotFoundError(name)
 
