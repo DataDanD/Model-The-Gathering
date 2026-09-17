@@ -99,7 +99,7 @@ def looks_like_forge_source(path: Path) -> bool:
 
 
 def find_desktop_jar(forge_home: Path) -> Path | None:
-    """Find a built Forge desktop fat JAR without recursively scanning the repo."""
+    """Find a built Forge desktop JAR, preferring the self-contained fat JAR."""
 
     target = forge_home / "forge-gui-desktop" / "target"
     if not target.is_dir():
@@ -109,21 +109,18 @@ def find_desktop_jar(forge_home: Path) -> Path | None:
         "forge-gui-desktop-*-jar-with-dependencies.jar",
         "forge-gui-desktop-*.jar",
     )
-    candidates: list[Path] = []
     for pattern in patterns:
-        candidates.extend(target.glob(pattern))
+        candidates = [
+            path
+            for path in target.glob(pattern)
+            if path.is_file()
+            and not path.name.endswith("-sources.jar")
+            and not path.name.endswith("-javadoc.jar")
+        ]
+        if candidates:
+            return max(candidates, key=lambda path: path.stat().st_mtime)
 
-    filtered = [
-        path
-        for path in candidates
-        if path.is_file()
-        and not path.name.endswith("-sources.jar")
-        and not path.name.endswith("-javadoc.jar")
-    ]
-    if not filtered:
-        return None
-
-    return max(filtered, key=lambda path: path.stat().st_mtime)
+    return None
 
 
 def run_forge_doctor(
