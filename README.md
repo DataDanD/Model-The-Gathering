@@ -9,6 +9,9 @@ The long-term direction is a common decision layer that can support large-scale 
 The active vertical slice provides:
 
 - lightweight Commander deck models and text parsing
+- bundled real 100-card Commander deck fixtures in `decks/`
+- Scryfall-backed exact-name card lookup with caching and polite request throttling
+- Commander validation for deck size, commander eligibility, legality, singleton rules, and color identity
 - stable deck fingerprints for experiment tracking
 - a `PlayerPolicy` interface for heuristic, LLM, and learned pilots
 - a `SimulationEngine` interface for mock, Forge, or future fast simulators
@@ -16,7 +19,7 @@ The active vertical slice provides:
 - repeated-game experiments with automatic cyclic seat rotation
 - win rates, average turn count, and Wilson 95% confidence intervals
 - SQLite persistence for experiment metadata and per-game results
-- pytest coverage for deck parsing, reproducibility, statistics, seat rotation, and persistence
+- pytest coverage for deck parsing, validation, reproducibility, statistics, seat rotation, persistence, and card-provider behavior
 
 The mock engine **does not simulate Magic**. It exists only to prove that the experiment plumbing is reproducible before a real rules engine is connected.
 
@@ -24,12 +27,15 @@ The mock engine **does not simulate Magic**. It exists only to prove that the ex
 
 ```text
 src/llmtg/
-  decks/          deck models and parsers
+  cards/          normalized card data and providers
+  decks/          deck models, parsers, and Commander validation
   policies/       player decision interfaces and baselines
   simulation/     simulation contracts and engines
   experiments/    orchestration, statistics, and persistence
 
+decks/            real Commander deck fixtures
 tests/            unit tests
+scripts/          small developer/CLI utilities
 archive/          donor/reference code from earlier projects
 ```
 
@@ -45,6 +51,44 @@ python -m venv .venv
 pip install -e ".[dev]"
 pytest
 ```
+
+## Validate a real Commander deck
+
+Two real 100-card example lists are included:
+
+```text
+decks/goreclaw.txt
+decks/talrand.txt
+```
+
+Validate one against live Scryfall data:
+
+```bash
+python scripts/validate_deck.py decks/goreclaw.txt
+```
+
+The validator currently checks:
+
+- exactly 100 cards including commander(s)
+- one commander or a two-card command zone
+- commander legality and basic commander eligibility
+- Commander legality for each main-deck card
+- singleton rules, while allowing basic lands and cards whose Oracle text allows any number
+- every card's color identity against the command zone's combined color identity
+
+Two-card command zones are intentionally conservative in this version: both cards are resolved and their color identities are combined, but Partner, Background, Doctor's companion, and other compatibility rules are not yet fully modeled.
+
+## Scryfall provider
+
+```python
+from llmtg.cards import ScryfallProvider
+
+provider = ScryfallProvider()
+card = provider.get_card("Rhystic Study")
+print(card.type_line, card.color_identity)
+```
+
+The live provider caches repeated lookups and spaces requests to remain below Scryfall's requested API rate. For large card-catalog workloads, the planned next step is a local bulk-data provider behind the same `CardProvider` interface.
 
 ## Run an experiment
 
@@ -97,9 +141,9 @@ The database stores an experiment header plus every game's ordered deck and poli
 
 ## Next milestones
 
-1. Add real Commander decklists and validation.
-2. Add a card-data provider backed by Scryfall/local catalog data.
-3. Implement a Forge-backed `SimulationEngine` adapter.
+1. Implement a Forge-backed `SimulationEngine` adapter.
+2. Add a local Scryfall bulk-data catalog for high-volume card resolution.
+3. Fully model multi-card Commander eligibility rules such as Partner and Background.
 4. Add matchup/meta sampling and richer experiment queries.
 5. Add an LLM deck-scientist that proposes mutations for A/B testing.
 6. Add stronger player policies and policy-vs-policy evaluation.
