@@ -4,11 +4,14 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from math import sqrt
+from typing import TypeVar
 
 from llmtg.decks.models import Deck
 from llmtg.policies.base import PlayerPolicy
 from llmtg.simulation.engine import SimulationEngine
 from llmtg.simulation.result import GameResult
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +49,7 @@ def wilson_interval(wins: int, games: int, *, z: float = 1.96) -> ConfidenceInte
     return ConfidenceInterval(low=max(0.0, center - margin), high=min(1.0, center + margin))
 
 
-def _rotate[T](items: Sequence[T], offset: int) -> tuple[T, ...]:
+def _rotate(items: Sequence[T], offset: int) -> tuple[T, ...]:
     if not items:
         return ()
     shift = offset % len(items)
