@@ -2,18 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, replace
-from pathlib import Path
+import os
+from dataclasses import asdict
 
 from llmtg.simulation.forge_runtime import (
     ForgeRuntimeConfig,
     required_checks_pass,
     run_forge_doctor,
 )
-
-
-def _path(value: str | None) -> Path | None:
-    return Path(value).expanduser().resolve() if value else None
 
 
 def main() -> int:
@@ -28,16 +24,19 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     args = parser.parse_args()
 
-    config = ForgeRuntimeConfig.from_environment()
-    config = replace(
-        config,
-        java_executable=args.java or config.java_executable,
-        forge_home=_path(args.forge_home) if args.forge_home else config.forge_home,
-        forge_jar=_path(args.forge_jar) if args.forge_jar else config.forge_jar,
-        working_dir=_path(args.working_dir) if args.working_dir else config.working_dir,
-        bridge_path=_path(args.bridge) if args.bridge else config.bridge_path,
-    )
+    env = dict(os.environ)
+    overrides = {
+        "LLMTG_FORGE_HOME": args.forge_home,
+        "LLMTG_FORGE_JAR": args.forge_jar,
+        "LLMTG_FORGE_WORKING_DIR": args.working_dir,
+        "LLMTG_FORGE_BRIDGE": args.bridge,
+        "LLMTG_JAVA": args.java,
+    }
+    for key, value in overrides.items():
+        if value:
+            env[key] = value
 
+    config = ForgeRuntimeConfig.from_environment(env)
     checks = run_forge_doctor(config)
     ok = required_checks_pass(checks)
 
@@ -64,10 +63,12 @@ def main() -> int:
         else:
             print("\nRequired runtime checks failed. Fix the FAIL items above.")
 
-        if config.forge_desktop_command() is not None:
-            print("Forge desktop command:", " ".join(config.forge_desktop_command() or ()))
-        if config.bridge_command() is not None:
-            print("Bridge command:", " ".join(config.bridge_command() or ()))
+        desktop_command = config.forge_desktop_command()
+        if desktop_command is not None:
+            print("Forge desktop command:", " ".join(desktop_command))
+        bridge_command = config.bridge_command()
+        if bridge_command is not None:
+            print("Bridge command:", " ".join(bridge_command))
 
     return 0 if ok else 1
 
