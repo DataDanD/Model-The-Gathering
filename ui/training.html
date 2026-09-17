@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Commander AI Lab — ML Training</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="global.css" />
+    <link rel="stylesheet" href="training.css" />
+</head>
+<body>
+    <script src="nav.js"></script>
+    <div class="page">
+        <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <div>
+                <h1>ML Training Dashboard</h1>
+                <p>Train, evaluate, and deploy the AI opponent policy network</p>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <button class="btn btn-ghost btn-sm" onclick="showIntroBanner()" title="Show getting started guide">&#10067; Help</button>
+                <button id="btn-refresh-data" class="btn btn-secondary" onclick="refreshAll()" title="Refresh training data status">
+                    <span class="btn-icon" id="refresh-icon">&#8635;</span> Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- Intro / Getting Started Banner -->
+        <div id="training-intro-banner" class="intro-banner hidden">
+            <div class="intro-banner-header">
+                <span class="intro-banner-icon">&#127891;</span>
+                <strong>Getting Started with ML Training</strong>
+                <button class="intro-banner-close" onclick="dismissIntroBanner()" title="Dismiss">&#10005;</button>
+            </div>
+            <p class="intro-banner-lead">This page trains a neural network to play Commander decisions. Follow these steps in order on your first run:</p>
+            <ol class="intro-banner-steps">
+                <li><strong>Run batch simulations</strong> with ML logging enabled (from the Simulator page) to generate decision log files.</li>
+                <li><strong>Start Training</strong> below &mdash; leave &ldquo;Rebuild dataset&rdquo; checked so it parses your logs into a dataset automatically.</li>
+                <li>Check <strong>Evaluation Results</strong> after training. Aim for &gt;60% test accuracy before moving on.</li>
+                <li><em>(Optional)</em> Run <strong>PPO reinforcement learning</strong> to fine-tune the policy via self-play. Only recommended after a solid supervised baseline.</li>
+                <li>Run a <strong>Tournament</strong> to benchmark your model against heuristic and random agents and get a win-rate score.</li>
+            </ol>
+            <div class="intro-banner-footer">
+                <label class="form-checkbox" style="font-size:12px;">
+                    <input type="checkbox" id="intro-dont-show" /> Don&rsquo;t show this again
+                </label>
+                <button class="btn btn-primary btn-sm" onclick="dismissIntroBanner()">Got it</button>
+            </div>
+        </div>
+
+        <!-- Status Overview Cards -->
+        <div class="status-grid stat-grid">
+            <div class="status-card stat-card" id="card-data">
+                <div class="card-icon">&#128202;</div>
+                <div class="card-label stat-label">Training Data</div>
+                <div class="card-value stat-value" id="val-decisions">--</div>
+                <div class="card-sub stat-sub" id="sub-decisions">decisions available</div>
+            </div>
+            <div class="status-card stat-card" id="card-dataset">
+                <div class="card-icon">&#128451;</div>
+                <div class="card-label stat-label">Dataset</div>
+                <div class="card-value stat-value" id="val-dataset">--</div>
+                <div class="card-sub stat-sub" id="sub-dataset">not built</div>
+            </div>
+            <div class="status-card stat-card" id="card-model">
+                <div class="card-icon">&#129504;</div>
+                <div class="card-label stat-label">Policy Model</div>
+                <div class="card-value stat-value" id="val-model">--</div>
+                <div class="card-sub stat-sub" id="sub-model">no checkpoint</div>
+            </div>
+            <div class="status-card stat-card" id="card-server">
+                <div class="card-icon">&#9889;</div>
+                <div class="card-label stat-label">Inference Server</div>
+                <div class="card-value stat-value" id="val-server">--</div>
+                <div class="card-sub stat-sub" id="sub-server">not loaded</div>
+            </div>
+        </div>
+
+        <!-- Training Control Panel -->
+        <section class="panel" id="train-panel">
+            <div class="panel-header">
+                <h2>Training Pipeline</h2>
+            </div>
+            <div class="train-controls">
+                <div class="param-grid form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="param-epochs">
+                            Epochs
+                            <span class="tip-icon" data-tip="Number of full passes over the training dataset. More epochs improve fit but risk overfitting. 50 is a safe starting point.">?</span>
+                        </label>
+                        <input type="number" id="param-epochs" class="form-input" value="50" min="1" max="500" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-lr">
+                            Learning Rate
+                            <span class="tip-icon" data-tip="Controls how large each weight update is. Too high causes instability; too low is very slow. 0.001 is a reliable default.">?</span>
+                        </label>
+                        <input type="number" id="param-lr" class="form-input" value="0.001" step="0.0001" min="0.00001" max="0.1" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-batch">
+                            Batch Size
+                            <span class="tip-icon" data-tip="Samples processed per gradient update. Larger batches are faster on GPU but use more VRAM. 256 is recommended for most setups.">?</span>
+                        </label>
+                        <input type="number" id="param-batch" class="form-input" value="256" min="16" max="2048" step="16" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-patience">
+                            Early Stop Patience
+                            <span class="tip-icon" data-tip="Stops training if validation loss doesn't improve for this many epochs in a row. Prevents wasted compute. 10 is a sensible default.">?</span>
+                        </label>
+                        <input type="number" id="param-patience" class="form-input" value="10" min="3" max="100" />
+                    </div>
+                </div>
+                <div class="train-options">
+                    <label class="form-checkbox checkbox-label">
+                        <input type="checkbox" id="param-rebuild" checked />
+                        Rebuild dataset from decision logs
+                        <span class="tip-icon" data-tip="Re-parses all .jsonl decision log files into a fresh dataset. Uncheck to reuse the last built dataset and save time on re-runs.">?</span>
+                    </label>
+                </div>
+                <div class="train-actions">
+                    <button id="btn-train" class="btn btn-primary" onclick="startTraining()">
+                        <span class="btn-icon">&#9654;</span> Start Training
+                    </button>
+                    <button id="btn-reload" class="btn btn-secondary" onclick="reloadModel()">
+                        <span class="btn-icon">&#8635;</span> Reload Model
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress Section (hidden when idle) -->
+            <div id="train-progress" class="train-progress hidden">
+                <div class="progress-header">
+                    <span id="progress-phase" class="phase-badge">BUILDING</span>
+                    <span id="progress-message">Initializing...</span>
+                </div>
+                <div class="progress-bar-container progress-track">
+                    <div class="progress-bar progress-fill" id="progress-bar"></div>
+                </div>
+                <div class="progress-detail" id="progress-detail"></div>
+            </div>
+        </section>
+
+        <!-- Data Files Panel -->
+        <section class="panel" id="data-panel">
+            <div class="panel-header">
+                <h2>Training Data Files</h2>
+            </div>
+            <div id="data-files-list" class="file-list">
+                <div class="empty-state">Loading data status...</div>
+            </div>
+        </section>
+
+        <!-- Evaluation Results Panel -->
+        <section class="panel" id="eval-panel">
+            <div class="panel-header">
+                <h2>Evaluation Results</h2>
+            </div>
+            <div id="eval-results" class="eval-container">
+                <div class="empty-state">No evaluation results yet. Train a model first.</div>
+            </div>
+        </section>
+
+        <!-- PPO Training Panel -->
+        <section class="panel" id="ppo-panel">
+            <div class="panel-header">
+                <h2>PPO Reinforcement Learning</h2>
+            </div>
+            <div class="train-controls">
+                <div class="param-grid form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="ppo-iterations">
+                            Iterations
+                            <span class="tip-icon" data-tip="Each iteration runs N episodes, computes returns, and updates the policy. 100 iterations is a typical starting point.">?</span>
+                        </label>
+                        <input type="number" id="ppo-iterations" class="form-input" value="100" min="1" max="1000" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="ppo-episodes">
+                            Episodes/Iter
+                            <span class="tip-icon" data-tip="Number of full game simulations per PPO update step. More episodes produce more stable gradients but slow down each iteration.">?</span>
+                        </label>
+                        <input type="number" id="ppo-episodes" class="form-input" value="64" min="8" max="512" step="8" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="ppo-lr">
+                            Learning Rate
+                            <span class="tip-icon" data-tip="PPO learning rate. Lower than supervised training is usually better — 0.0003 is a standard RL starting value.">?</span>
+                        </label>
+                        <input type="number" id="ppo-lr" class="form-input" value="0.0003" step="0.0001" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="ppo-opponent">
+                            Opponent
+                            <span class="tip-icon" data-tip="Who the agent plays against during training. Heuristic is the best first opponent. Self-Play is more advanced and can be unstable early on.">?</span>
+                        </label>
+                        <select id="ppo-opponent" class="form-select">
+                            <option value="heuristic">Heuristic</option>
+                            <option value="random">Random</option>
+                            <option value="self">Self-Play</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="train-options">
+                    <label class="form-checkbox checkbox-label">
+                        <input type="checkbox" id="ppo-load-supervised" />
+                        Initialize from supervised checkpoint (warm start)
+                        <span class="tip-icon" data-tip="Strongly recommended. Starts PPO from your best supervised model instead of random weights. PPO from scratch is very slow and unstable.">?</span>
+                    </label>
+                </div>
+                <div class="train-actions">
+                    <button id="btn-ppo" class="btn btn-purple" onclick="startPPO()">
+                        <span class="btn-icon">&#9654;</span> Start PPO Training
+                    </button>
+                </div>
+            </div>
+            <div id="ppo-progress" class="train-progress hidden">
+                <div class="progress-header">
+                    <span id="ppo-progress-phase" class="phase-badge">TRAINING</span>
+                    <span id="ppo-progress-message">Initializing...</span>
+                </div>
+                <div class="progress-bar-container progress-track">
+                    <div class="progress-bar progress-fill" id="ppo-progress-bar"></div>
+                </div>
+                <div class="progress-detail" id="ppo-progress-detail"></div>
+            </div>
+        </section>
+
+        <!-- Tournament Panel -->
+        <section class="panel" id="tournament-panel">
+            <div class="panel-header">
+                <h2>Tournament Evaluation</h2>
+            </div>
+            <div class="train-controls">
+                <div class="param-grid form-row tourney-param-grid">
+                    <div class="form-group">
+                        <label class="form-label" for="tourney-episodes">
+                            Games per Matchup
+                            <span class="tip-icon" data-tip="Number of games played per policy pair. Use at least 50–100 games for a statistically reliable win rate.">?</span>
+                        </label>
+                        <input type="number" id="tourney-episodes" class="form-input" value="50" min="10" max="500" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="tourney-style">
+                            Playstyle
+                            <span class="tip-icon" data-tip="The deck archetype used during tournament games. Try Midrange first — it's the most balanced and representative of typical Commander gameplay.">?</span>
+                        </label>
+                        <select id="tourney-style" class="form-select">
+                            <option value="midrange">Midrange</option>
+                            <option value="aggro">Aggro</option>
+                            <option value="control">Control</option>
+                            <option value="combo">Combo</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="train-actions">
+                    <button id="btn-tourney" class="btn btn-success" onclick="startTournament()">
+                        <span class="btn-icon">&#127942;</span> Run Tournament
+                    </button>
+                </div>
+            </div>
+            <div id="tourney-progress" class="train-progress hidden">
+                <div class="progress-header">
+                    <span id="tourney-progress-phase" class="phase-badge running">RUNNING</span>
+                    <span id="tourney-progress-message">Running matches...</span>
+                </div>
+                <div class="progress-bar-container progress-track">
+                    <div class="progress-bar progress-fill" id="tourney-progress-bar"></div>
+                </div>
+            </div>
+            <div id="tourney-results" class="eval-container tourney-results-section">
+            </div>
+        </section>
+
+        <!-- Checkpoint History -->
+        <section class="panel" id="checkpoint-panel">
+            <div class="panel-header">
+                <h2>Model Checkpoints</h2>
+            </div>
+            <div id="checkpoint-list" class="checkpoint-list">
+                <div class="empty-state">No checkpoints found.</div>
+            </div>
+        </section>
+    </div>
+
+    <script src="training.js"></script>
+</body>
+</html>

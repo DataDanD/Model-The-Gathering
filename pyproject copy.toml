@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "commander-ai-lab"
+version = "1.0.0"
+description = "Commander AI Lab — EDH deck simulation, collection management, and analysis tools"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.24.0",
+    "websockets>=11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "httpx>=0.24.0",
+    "ruff>=0.1.0",
+]
+# RAG Phase 2: ChromaDB vector store + Ollama embedding support
+# Install with:  pip install ".[rag]"
+rag = [
+    "chromadb>=0.5.0",
+]
+# Local coach embeddings (sentence-transformers, no Ollama required)
+# Install with:  pip install ".[coach-embeddings]"
+coach-embeddings = [
+    "sentence-transformers>=3.0.0",
+    "torch>=2.0.0",
+    "pandas>=1.5.0",
+    "pyarrow>=12.0.0",
+]
+# Full local AI stack (RAG + coach embeddings)
+# Install with:  pip install ".[all]"
+all = [
+    "chromadb>=0.5.0",
+    "sentence-transformers>=3.0.0",
+    "torch>=2.0.0",
+    "pandas>=1.5.0",
+    "pyarrow>=12.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+commander-sim = "commander_ai_lab.lab.experiments:_cli_main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

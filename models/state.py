@@ -1,0 +1,159 @@
+"""Runtime configuration, state classes, and static data for Commander AI Lab."""
+from __future__ import annotations
+import json
+import logging
+import os
+import subprocess
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+# ── .env bootstrap ────────────────────────────────────────────
+# Load .env automatically so plain `python script.py` and bare uvicorn
+# both pick up FORGE_DIR, PRECON_DIR, etc. without a manual load_dotenv
+# call at every entry point. override=False means real env vars always win.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _here = Path(__file__).resolve().parent
+    for _candidate in [_here, _here.parent, _here.parent.parent]:
+        _env_file = _candidate / ".env"
+        if _env_file.is_file():
+            _load_dotenv(dotenv_path=_env_file, override=False)
+            break
+except ImportError:
+    pass  # python-dotenv not installed; rely on real environment variables
+# ─────────────────────────────────────────────────────────────
+
+log = logging.getLogger("commander_ai_lab.api")
+
+
+# ══════════════════════════════════════════════════════════════
+# Configuration
+# ══════════════════════════════════════════════════════════════
+class Config:
+    """Runtime configuration -- set via CLI args or env vars."""
+    forge_jar: str = ""
+    forge_dir: str = ""
+    forge_decks_dir: str = ""
+    user_decks_dir: str = ""
+    lab_jar: str = ""
+    precon_dir: str = ""
+    results_dir: str = "results"
+    port: int = 8080
+    ximilar_api_key: str = ""
+    pplx_api_key: str = ""
+    anthropic_api_key: str = ""
+
+
+CFG = Config()
+
+# Pre-populate from environment so uvicorn/ASGI mode works without CLI args.
+# CLI args (lab_api.py main()) will override these if provided.
+CFG.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+CFG.ximilar_api_key   = os.environ.get("XIMILAR_API_KEY", "")
+CFG.pplx_api_key      = os.environ.get("PPLX_API_KEY", "")
+CFG.forge_jar         = os.environ.get("FORGE_JAR", "")
+CFG.forge_dir         = os.environ.get("FORGE_DIR", "")
+CFG.lab_jar           = os.environ.get("LAB_JAR", "")
+# PRECON_DIR / PRECON_DECKS_DIR are aliases -- prefer PRECON_DIR
+CFG.precon_dir        = os.environ.get("PRECON_DIR") or os.environ.get("PRECON_DECKS_DIR", "")
+CFG.forge_decks_dir   = os.environ.get("FORGE_DECKS_DIR", "")
+CFG.user_decks_dir    = os.environ.get(
+    "USER_DECKS_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "user-decks")
+)
+
+
+def validate_forge_config() -> None:
+    """Warn clearly at startup if FORGE_DIR is misconfigured."""
+    if not CFG.forge_dir:
+        log.warning("FORGE_DIR not set -- Forge card enrichment disabled. "
+                    "Set FORGE_DIR to your forge-repo root or forge-gui directory.")
+        return
+    base = Path(CFG.forge_dir)
+    a = base / "forge-gui" / "res" / "cardsfolder"
+    b = base / "res" / "cardsfolder"
+    if not a.is_dir() and not b.is_dir():
+        log.warning(
+            "FORGE_DIR=%s is set but cardsfolder not found at:\n"
+            "  %s\n  %s\n"
+            "Check that FORGE_DIR points to forge-repo root or forge-gui/.",
+            CFG.forge_dir, a, b
+        )
+    else:
+        resolved = a if a.is_dir() else b
+        log.info("Forge cardsfolder confirmed at %s", resolved)
+
+
+# ══════════════════════════════════════════════════════════════
+# In-Memory State
+# ══════════════════════════════════════════════════════════════
+class BatchState:
+    def __init__(self, batch_id: str, total_games: int, threads: int):
+        self.batch_id = batch_id
+        self.total_games = total_games
+        self.threads = threads
+        self.completed_games = 0
+        self.running = True
+        self.start_time = datetime.now()
+        self.elapsed_ms = 0
+        self.result_path: Optional[str] = None
+        self.error: Optional[str] = None
+        self.process: Optional[subprocess.Popen] = None
+        self.log_lines: list = []
+        self.sims_per_sec: float = 0.0
+
+
+import asyncio as _asyncio
+active_batches: dict[str, BatchState] = {}
+active_batches_lock = _asyncio.Lock()
+
+
+COMMANDER_META: dict = {}
+
+BUILTIN_COMMANDERS: dict = {
+    "Edgar Markov": [{"source": "edhrec", "archetype": "aggro", "colorIdentity": ["W","B","R"]}],
+    "Atraxa, Praetors' Voice": [{"source": "edhrec", "archetype": "midrange", "colorIdentity": ["W","U","B","G"]}],
+    "Korvold, Fae-Cursed King": [{"source": "edhrec", "archetype": "combo", "colorIdentity": ["B","R","G"]}],
+    "Muldrotha, the Gravetide": [{"source": "edhrec", "archetype": "midrange", "colorIdentity": ["U","B","G"]}],
+    "The Ur-Dragon": [{"source": "edhrec", "archetype": "midrange", "colorIdentity": ["W","U","B","R","G"]}],
+    "Yuriko, the Tiger's Shadow": [{"source": "edhrec", "archetype": "aggro", "colorIdentity": ["U","B"]}],
+    "Krenko, Mob Boss": [{"source": "edhrec", "archetype": "aggro", "colorIdentity": ["R"]}],
+    "Meren of Clan Nel Toth": [{"source": "edhrec", "archetype": "midrange", "colorIdentity": ["B","G"]}],
+    "Prossh, Skyraider of Kher": [{"source": "edhrec", "archetype": "combo", "colorIdentity": ["B","R","G"]}],
+    "Kaalia of the Vast": [{"source": "edhrec", "archetype": "aggro", "colorIdentity": ["W","B","R"]}],
+    "Talrand, Sky Summoner": [{"source": "edhrec", "archetype": "control", "colorIdentity": ["U"]}],
+    "Omnath, Locus of Creation": [{"source": "edhrec", "archetype": "combo", "colorIdentity": ["W","U","R","G"]}],
+    "Teysa Karlov": [{"source": "edhrec", "archetype": "combo", "colorIdentity": ["W","B"]}],
+    "Lathril, Blade of the Elves": [{"source": "edhrec", "archetype": "aggro", "colorIdentity": ["B","G"]}],
+    "Breya, Etherium Shaper": [{"source": "edhrec", "archetype": "combo", "colorIdentity": ["W","U","B","R"]}],
+}
+
+
+def load_commander_meta() -> None:
+    """Load commander meta mapping from file or fall back to builtins."""
+    meta_path = Path(__file__).parent.parent / "commander-meta.json"
+    if meta_path.exists():
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                COMMANDER_META.clear()
+                COMMANDER_META.update(json.load(f))
+            log.info(f" Meta: Loaded {len(COMMANDER_META)} commanders from {meta_path}")
+            return
+        except Exception as e:
+            log.warning(f" WARNING: Failed to load commander-meta.json: {e}")
+    COMMANDER_META.clear()
+    COMMANDER_META.update(BUILTIN_COMMANDERS)
+    log.info(f" Meta:    {len(COMMANDER_META)} built-in commanders")
+
+
+# ══════════════════════════════════════════════════════════════
+# AI Profiles
+# ══════════════════════════════════════════════════════════════
+AI_PROFILES = {
+    "default": {"name": "default", "description": "Balanced — Forge's default AI behavior", "aggression": 0.5, "cardAdvantage": 0.5, "removalPriority": 0.5, "boardPresence": 0.5, "comboPriority": 0.3, "patience": 0.5},
+    "aggro": {"name": "aggro", "description": "Aggressive — attacks early, prioritizes damage", "aggression": 0.9, "cardAdvantage": 0.3, "removalPriority": 0.3, "boardPresence": 0.8, "comboPriority": 0.1, "patience": 0.1},
+    "control": {"name": "control", "description": "Control — defensive, removal-heavy, card advantage", "aggression": 0.2, "cardAdvantage": 0.9, "removalPriority": 0.9, "boardPresence": 0.3, "comboPriority": 0.4, "patience": 0.9},
+    "combo": {"name": "combo", "description": "Combo — ramps, digs for pieces, assembles combos", "aggression": 0.2, "cardAdvantage": 0.8, "removalPriority": 0.4, "boardPresence": 0.3, "comboPriority": 0.95, "patience": 0.7},
+    "midrange": {"name": "midrange", "description": "Midrange — flexible, strong board presence, value-oriented", "aggression": 0.5, "cardAdvantage": 0.6, "removalPriority": 0.6, "boardPresence": 0.7, "comboPriority": 0.3, "patience": 0.5},
+}

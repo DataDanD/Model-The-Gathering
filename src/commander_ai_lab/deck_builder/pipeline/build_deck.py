@@ -1,0 +1,422 @@
+"""
+7-step deck build pipeline for the Commander AI Deck Builder.
+
+Orchestrates: EDHrec data -> Scryfall -> Ollama suggestions ->
+  color filter -> synergy rank -> ratio enforce -> final assembly.
+"""
+
+from __future__ import annotations
+
+import logging
+import sqlite3
+import time
+from typing import Dict, List, Optional
+
+import httpx
+
+from ..api import edhrec, scryfall
+from ..api import ollama_client as ollama
+from ..api.sim_insights import get_sim_insights
+from ..core.collection_filter import filter_names_by_collection
+from ..core.models import BuildRequest, BuildResult, CardEntry, CommanderDeck, DeckRatios
+from ..core.rules_engine import check_ban_list, filter_by_color_identity, validate_deck
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Card-name validation helper
+# ---------------------------------------------------------------------------
+
+_SCRYFALL_NAMED_URL = "https://api.scryfall.com/cards/named"
+_SCRYFALL_HEADERS = {"User-Agent": "commander-ai-lab/1.0"}
+_SCRYFALL_TIMEOUT = 5.0  # seconds per lookup
+
+
+def validate_card_names(
+    names: List[str],
+    db_conn: Optional[sqlite3.Connection] = None,
+) -> List[str]:
+    """Return only names that resolve to real MTG cards.
+
+    Resolution order:
+      1. Exact match (case-insensitive) in ``collection_entries`` DB.
+      2. Scryfall ``/cards/named?fuzzy=<name>`` HTTP lookup.
+
+    Names that fail both checks are dropped and logged as hallucinations.
+    The returned list preserves the original order of surviving names.
+
+    Parameters
+    ----------
+    names:
+        Raw list of card name strings from ``suggest_cards()``.
+    db_conn:
+        Optional SQLite connection to the lab database.  When provided,
+        local collection lookups are attempted before hitting Scryfall,
+        which is faster and avoids unnecessary network calls for cards
+        the user already owns.
+    """
+    if not names:
+        return []
+
+    valid: List[str] = []
+    dropped: List[str] = []
+
+    for raw_name in names:
+        name = raw_name.strip()
+        if not name:
+            continue
+
+        resolved = False
+
+        # -- 1. Local DB check --
+        if db_conn is not None:
+            try:
+                row = db_conn.execute(
+                    "SELECT name FROM collection_entries "
+                    "WHERE name = ? COLLATE NOCASE LIMIT 1",
+                    (name,),
+                ).fetchone()
+                if row:
+                    valid.append(row[0])  # use canonical capitalisation from DB
+                    resolved = True
+            except Exception as db_err:
+                logger.debug("DB lookup failed for '%s': %s", name, db_err)
+
+        if resolved:
+            continue
+
+        # -- 2. Scryfall fuzzy lookup --
+        try:
+            import urllib.parse
+            url = f"{_SCRYFALL_NAMED_URL}?fuzzy={urllib.parse.quote(name)}"
+            resp = httpx.get(url, headers=_SCRYFALL_HEADERS, timeout=_SCRYFALL_TIMEOUT)
+            if resp.status_code == 200:
+                data = resp.json()
+                canonical = data.get("name", name)
+                valid.append(canonical)
+                resolved = True
+            # 404 = card not found; any other status = treat as unresolved
+        except Exception as sf_err:
+            logger.debug("Scryfall lookup failed for '%s': %s", name, sf_err)
+
+        if not resolved:
+            dropped.append(name)
+
+    if dropped:
+        examples = dropped[:5]
+        logger.warning(
+            "validate_card_names: dropped %d hallucinated/unresolvable name(s) "
+            "(showing up to 5): %s",
+            len(dropped),
+            examples,
+        )
+
+    return valid
+
+
+# ---------------------------------------------------------------------------
+# Pipeline
+# ---------------------------------------------------------------------------
+
+
+def build_deck(request: BuildRequest) -> BuildResult:
+    """
+    Execute the full 7-step deck build pipeline.
+
+    Steps:
+        1. Resolve commander via Scryfall
+        2. Fetch EDHrec recommendations
+        3. Fetch Scryfall candidates by category
+        4. Ollama: suggest additional cards + fill gaps
+        5. Filter by color identity + collection + ban list
+        6. Ollama: enforce deck ratios (trim/expand to 99)
+        7. Ollama: assemble final structured deck JSON
+    """
+    start = time.time()
+    warnings: List[str] = []
+    sources: List[str] = []
+
+    # ── Step 1: Resolve commander ────────────────────────────────────────────
+    logger.info(f"Step 1: Resolving commander '{request.commander_name}'")
+    commander = scryfall.search_commander(request.commander_name)
+    if not commander:
+        commander = scryfall.get_card_by_name(request.commander_name)
+    if not commander:
+        raise ValueError(f"Commander not found: {request.commander_name}")
+
+    commander_ci = commander.color_identity
+    ci_list = sorted(commander_ci)
+    logger.info(f"Commander: {commander.name}, CI: {ci_list}")
+    sources.append("scryfall")
+
+    # Load simulation insights once; injected into Ollama prompts in Steps 4 & 6.
+    # Returns "" when learned_weights.json doesn't exist or has no meaningful drift
+    # yet — so behaviour is identical to before until real sim data is available.
+    sim_context = get_sim_insights()
+    if sim_context:
+        logger.info("Sim insights available — injecting into Ollama prompts")
+        sources.append("sim_weights")
+    else:
+        logger.debug("No sim insights available (run update_weights.py after overnight sims)")
+
+    # ── Step 2: Fetch EDHrec recommendations ─────────────────────────────
+    logger.info(f"Step 2: Fetching EDHrec data for '{commander.name}'")
+    edhrec_cards = edhrec.get_recommended_cards(commander.name)
+    if edhrec_cards:
+        sources.append("edhrec")
+        logger.info(f"EDHrec returned {len(edhrec_cards)} cards")
+    else:
+        warnings.append("EDHrec returned no data — relying on Scryfall + Ollama")
+
+    # ── Step 3: Fetch Scryfall candidates by category ──────────────────────
+    logger.info("Step 3: Fetching Scryfall candidates by category")
+    scryfall_candidates: Dict[str, List[CardEntry]] = {
+        "ramp": scryfall.search_ramp(commander_ci),
+        "removal": scryfall.search_removal(commander_ci),
+        "card_draw": scryfall.search_card_draw(commander_ci),
+        "lands": scryfall.search_lands(commander_ci),
+    }
+    for cat, cards in scryfall_candidates.items():
+        logger.info(f"  Scryfall {cat}: {len(cards)} candidates")
+
+    # ── Step 4: Ollama suggestions to fill gaps ──────────────────────────
+    logger.info("Step 4: Ollama suggesting additional cards")
+
+    # Collect all names we already have
+    all_names: List[str] = [c.name for c in edhrec_cards]
+    for cards in scryfall_candidates.values():
+        all_names.extend(c.name for c in cards)
+    all_names = list(set(all_names))
+
+    # Grab a DB connection once for the validation step (best-effort)
+    _db_conn: Optional[sqlite3.Connection] = None
+    if request.collection_path:
+        try:
+            _db_conn = sqlite3.connect(request.collection_path)
+        except Exception as e:
+            logger.debug("Could not open DB for name validation: %s", e)
+
+    # Ask Ollama to suggest cards for categories that need more.
+    # sim_context is forwarded so the LLM factors in what traits have
+    # been statistically successful in our own game simulations.
+    categories_to_fill = ["synergy", "protection", "wincon"]
+    ollama_suggestions: Dict[str, List[str]] = {}
+
+    for category in categories_to_fill:
+        suggested = ollama.suggest_cards(
+            commander_name=commander.name,
+            color_identity=ci_list,
+            category=category,
+            count=15,
+            exclude=all_names,
+            strategy_notes=request.strategy_notes,
+            sim_context=sim_context,
+        )
+
+        # ── Validation gate: drop hallucinated / unresolvable names ──────
+        before = len(suggested)
+        suggested = validate_card_names(suggested, db_conn=_db_conn)
+        after = len(suggested)
+        if before != after:
+            warnings.append(
+                f"Step 4 [{category}]: {before - after} suggested name(s) could not be "
+                f"resolved against DB/Scryfall and were dropped."
+            )
+
+        ollama_suggestions[category] = suggested
+        all_names.extend(suggested)
+        logger.info(f"  Ollama {category}: {after} valid suggestions ({before} raw)")
+
+    if _db_conn:
+        try:
+            _db_conn.close()
+        except Exception:
+            pass
+
+    sources.append("ollama")
+
+    # ── Step 5: Filter (color identity, collection, ban list) ────────────────
+    logger.info("Step 5: Filtering candidates")
+
+    # Build a unified name pool per category
+    cards_by_category: Dict[str, List[str]] = {}
+
+    # EDHrec cards (already categorized)
+    for card in edhrec_cards:
+        cat = card.category
+        cards_by_category.setdefault(cat, []).append(card.name)
+
+    # Scryfall candidates
+    for cat, cards in scryfall_candidates.items():
+        cards_by_category.setdefault(cat, []).extend(c.name for c in cards)
+
+    # Ollama suggestions
+    for cat, names in ollama_suggestions.items():
+        cards_by_category.setdefault(cat, []).extend(names)
+
+    # Deduplicate within each category
+    for cat in cards_by_category:
+        cards_by_category[cat] = list(dict.fromkeys(cards_by_category[cat]))
+
+    # Collection filter (if enabled)
+    if request.collection_only and request.collection_path:
+        logger.info("  Applying collection filter")
+        for cat in cards_by_category:
+            before = len(cards_by_category[cat])
+            cards_by_category[cat] = filter_names_by_collection(
+                cards_by_category[cat], request.collection_path
+            )
+            after = len(cards_by_category[cat])
+            if before != after:
+                logger.info(f"  {cat}: {before} -> {after} after collection filter")
+
+    # Ban list filter
+    for cat in cards_by_category:
+        from ..core.rules_engine import BANNED_CARDS
+        cards_by_category[cat] = [
+            n for n in cards_by_category[cat] if n not in BANNED_CARDS
+        ]
+
+    # ── Step 6: Ollama enforce ratios ────────────────────────────────────
+    logger.info("Step 6: Ollama enforcing deck ratios")
+    target_ratios = {
+        "lands": request.ratios.lands,
+        "ramp": request.ratios.ramp,
+        "card_draw": request.ratios.card_draw,
+        "removal": request.ratios.removal,
+        "protection": request.ratios.protection,
+        "synergy": request.ratios.synergy,
+        "wincon": request.ratios.wincon,
+        "uncategorized": request.ratios.uncategorized,
+    }
+
+    # sim_context is forwarded so Ollama preferentially retains cards
+    # matching high-value sim traits when trimming over-filled categories.
+    adjusted = ollama.enforce_deck_ratios(
+        cards_by_category=cards_by_category,
+        target_ratios=target_ratios,
+        commander_name=commander.name,
+        sim_context=sim_context,
+    )
+
+    # Verify total is 99
+    total = sum(len(v) for v in adjusted.values())
+    if total != 99:
+        warnings.append(f"Ollama returned {total} cards instead of 99 — adjusting")
+        logger.warning(f"Ratio enforcement returned {total} cards")
+
+    # ── Step 7: Assemble final deck ────────────────────────────────────────
+    logger.info("Step 7: Assembling final deck")
+
+    # Build a globally-deduplicated name list. enforce_deck_ratios can
+    # return the same card name under multiple category keys (e.g. a
+    # protection card that also appears in synergy). Without this step
+    # get_cards_by_names produces duplicate CardEntry objects that
+    # immediately fail the CommanderDeck singleton validator.
+    seen_names: dict[str, str] = {}  # name -> first category that claimed it
+    for cat, names in adjusted.items():
+        for name in names:
+            if name not in seen_names:
+                seen_names[name] = cat
+            else:
+                logger.warning(
+                    "Duplicate card '%s' found in categories '%s' and '%s' — "
+                    "keeping first assignment, dropping second",
+                    name, seen_names[name], cat,
+                )
+
+    if len(seen_names) < sum(len(v) for v in adjusted.values()):
+        warnings.append(
+            "enforce_deck_ratios returned duplicate card names across categories; "
+            "duplicates were silently dropped before singleton validation."
+        )
+
+    all_card_names = list(seen_names.keys())
+
+    card_entries = scryfall.get_cards_by_names(all_card_names)
+
+    # Safety-net: deduplicate CardEntry list by name in case Scryfall
+    # returns multiple printings for the same name.
+    seen_entry_names: set[str] = set()
+    unique_entries: List[CardEntry] = []
+    for entry in card_entries:
+        if entry.name not in seen_entry_names:
+            seen_entry_names.add(entry.name)
+            unique_entries.append(entry)
+        else:
+            logger.warning("Scryfall returned duplicate entry for '%s' — skipping", entry.name)
+    card_entries = unique_entries
+
+    # Map back categories
+    for entry in card_entries:
+        if entry.name in seen_names:
+            entry.category = seen_names[entry.name]
+
+    # -- Backfill basic lands to reach exactly 99 cards ----------------
+    _BACKFILL_COLOR_TO_BASIC = {
+        "W": "Plains", "U": "Island", "B": "Swamp",
+        "R": "Mountain", "G": "Forest",
+    }
+    _BASIC_LAND_NAMES = set(_BACKFILL_COLOR_TO_BASIC.values()) | {"Wastes"}
+    _current_total = sum(e.quantity for e in card_entries)
+    _shortfall = 99 - _current_total
+    if _shortfall > 0:
+        logger.warning(
+            "Deck has %d cards after dedup -- backfilling %d basic land(s)",
+            _current_total, _shortfall,
+        )
+        warnings.append(
+            f"Backfilled {_shortfall} basic land(s) to reach 99 cards"
+        )
+        _basics = [
+            _BACKFILL_COLOR_TO_BASIC[c]
+            for c in sorted(commander_ci)
+            if c in _BACKFILL_COLOR_TO_BASIC
+        ] or ["Wastes"]
+        # Distribute evenly across colors
+        _per_color = _shortfall // len(_basics)
+        _remainder = _shortfall % len(_basics)
+        for _i, _bname in enumerate(_basics):
+            _qty = _per_color + (1 if _i < _remainder else 0)
+            if _qty <= 0:
+                continue
+            # Check if this basic is already in card_entries
+            _found = False
+            for _ce in card_entries:
+                if _ce.name == _bname:
+                    _ce.quantity += _qty
+                    _found = True
+                    break
+            if not _found:
+                card_entries.append(CardEntry(
+                    name=_bname,
+                    quantity=_qty,
+                    category="lands",
+                    type_line="Basic Land",
+                ))
+
+    # Build the deck
+    elapsed = time.time() - start
+    logger.info(f"Deck built in {elapsed:.1f}s")
+
+    try:
+        deck = CommanderDeck(
+            commander=commander,
+            cards=card_entries,
+            ratios=request.ratios,
+        )
+    except ValueError as e:
+        warnings.append(f"Deck validation issue: {e}")
+        # Return a "best effort" deck without strict validation
+        deck = CommanderDeck.model_construct(
+            commander=commander,
+            cards=card_entries,
+            ratios=request.ratios,
+        )
+
+    return BuildResult(
+        deck=deck,
+        warnings=warnings,
+        sources_consulted=sources,
+        build_time_seconds=elapsed,
+    )

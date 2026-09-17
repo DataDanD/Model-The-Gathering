@@ -1,0 +1,55 @@
+# Java
+target/
+*.class
+*.jar
+!src/**/*.jar
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+venv/
+.env
+
+# Node
+node_modules/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Data
+*.db
+*.npz
+results/
+deck-reports/
+coach-sessions/
+embeddings/
+checkpoints/
+imported-decks/
+
+# User-created decks (generated at runtime, not committed)
+user-decks/*.dck
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Runtime artifacts / caches
+static/
+api/
+image_cache/
+data/rag_chroma/
+.claude/
+dependency-reduced-pom.xml
+
+# Precon decks (generated / imported at runtime)
+precon-decks/

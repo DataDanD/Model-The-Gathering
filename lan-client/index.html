@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MTG Commander Battlefield</title>
+<link rel="stylesheet" href="style.css?v=20260403_0300">
+</head>
+<body>
+
+<!-- ====================================================
+     SETUP SCREEN
+     ==================================================== -->
+<div id="setup-screen">
+  <!-- Populated by ui.js initSetupScreen() -->
+</div>
+
+<!-- ====================================================
+     TABLE SURFACE — 4-Quadrant Battlefield
+     ==================================================== -->
+<div class="table-surface" id="game-battlefield" style="display:none;">
+
+  <!-- TOP BAR: Phase tracker + controls -->
+  <div id="top-bar">
+    <span class="top-bar-logo">Commander</span>
+
+    <div class="turn-counter-badge" id="turn-counter">Turn <span>1</span></div>
+
+    <div class="active-player-indicator" id="active-player-indicator">
+      <span class="active-player-dot" id="active-dot" style="background:#c0392b;"></span>
+      Player 1's Turn
+    </div>
+
+    <!-- Phase track -->
+    <div class="phase-track-wrapper">
+      <div class="phase-track" id="phase-track"></div>
+    </div>
+
+    <!-- Phase/turn action buttons -->
+    <div class="top-bar-actions">
+      <button class="btn-phase" onclick="nextPhase()" title="Advance to next phase (N)">Next Phase</button>
+      <button class="btn-phase btn-next-turn" onclick="nextTurn()" title="End turn, advance to next player (T)">Next Turn</button>
+    </div>
+
+    <!-- Utility buttons -->
+    <div class="top-bar-utils">
+      <button class="btn-util" id="btn-undo" onclick="undo()" title="Undo (Ctrl+Z)" disabled>&#x21A9;</button>
+      <button class="btn-util" id="btn-redo" onclick="redo()" title="Redo (Ctrl+Y)" disabled>&#x21AA;</button>
+      <button class="btn-util" id="btn-triggers" onclick="toggleTriggerStack()" title="Trigger Stack">&#x2747;</button>
+      <button class="btn-util" onclick="openDiceModal()" title="Dice &amp; Coins (G)">&#x1F3B2;</button>
+      <button class="btn-util" onclick="checkStateBasedActions()" title="Check State-Based Actions">SBA</button>
+      <button class="btn-util" onclick="toggleSettingsPanel()" title="Settings">&#x2699;</button>
+      <button class="btn-util" id="btn-search-toggle" onclick="document.getElementById('card-search-sidebar').classList.toggle('collapsed')" title="Card Search (S)">&#x1F50D;</button>
+      <button class="btn-util" id="btn-deckbuilder-toggle" onclick="toggleDeckBuilderPanel()" title="Deck Builder">&#x1F0CF;</button>
+      <button class="btn-util btn-util-exit" onclick="location.reload()" title="Return to Start Screen">&#x2715;</button>
+    </div>
+
+    <!-- Storm counter -->
+    <span id="storm-badge" style="display:none;font-size:10px;color:var(--mtg-gold);background:rgba(200,168,67,0.15);border:1px solid rgba(200,168,67,0.3);border-radius:4px;padding:2px 7px;white-space:nowrap;">Storm: 0</span>
+  </div>
+
+  <!-- DIVIDER LINES -->
+  <div class="divider-h"></div>
+  <div class="divider-v"></div>
+
+  <!-- CORNER ACCENTS -->
+  <div class="corner-accent tl"></div>
+  <div class="corner-accent tr"></div>
+  <div class="corner-accent bl"></div>
+  <div class="corner-accent br"></div>
+
+
+  <!-- ================================================
+       4-QUADRANT BATTLEFIELD
+       ================================================ -->
+  <div class="battlefield">
+
+    <!-- PLAYER 1: Top-Left (Crimson) -->
+    <div class="player-area p1" id="player-area-1">
+      <span class="player-label" id="player-label-1">Player 1</span>
+
+      <!-- Zone Row: Library, Exile, Graveyard, Hand -->
+      <div class="zone-row" id="zone-row-1">
+        <div class="zone library" id="lib-zone-1" data-player="1" data-zone="library"
+             onclick="openZoneModal(0,'library')" data-tooltip="Library">
+          <span class="card-count" id="lib-count-1">0</span>
+          <span class="zone-icon">&#x1F4DA;</span>
+          <span class="zone-name">Library</span>
+        </div>
+        <div class="zone exile" id="exile-zone-1" data-player="1" data-zone="exile"
+             onclick="openZoneModal(0,'exile')" data-tooltip="Exile">
+          <span class="card-count" id="exile-count-1" style="display:none;">0</span>
+          <span class="zone-icon">&#x2B21;</span>
+          <span class="zone-name">Exile</span>
+        </div>
+        <div class="zone graveyard" id="gv-zone-1" data-player="1" data-zone="graveyard"
+             onclick="openZoneModal(0,'graveyard')" data-tooltip="Graveyard">
+          <span class="card-count" id="gv-count-1" style="display:none;">0</span>
+          <span class="zone-icon">&#x2620;</span>
+          <span class="zone-name">Grave</span>
+        </div>
+        <div class="zone hand" id="hand-zone-1" data-player="1" data-zone="hand"
+             onclick="openZoneModal(0,'hand')" data-tooltip="Hand">
+          <span class="zone-icon">&#x1F0CF;</span>
+          <span class="zone-name">Hand (<span id="hand-count-1">0</span>)</span>
+        </div>
+      </div>
+
+      <!-- Commander Row -->
+      <div class="commander-row" id="cmd-row-1">
+        <div class="zone commander" id="cmd-zone-1" data-player="1" data-zone="command"
+             onclick="openZoneModal(0,'command')" data-tooltip="Command Zone">
+          <span class="zone-icon">&#x1F451;</span>
+          <span class="zone-name">Commander</span>
+        </div>
+      </div>
+
+      <!-- Battle Zone -->
+      <div class="battle-zone" id="battle-zone-1">
+        <div class="battle-zone-inner"></div>
+        <span class="battle-zone-label">Battlefield</span>
+        <!-- Battlefield cards injected here -->
+      </div>
+    </div>
+
+    <!-- PLAYER 2: Top-Right (Sapphire) -->
+    <div class="player-area p2" id="player-area-2">
+      <span class="player-label" id="player-label-2">Player 2</span>
+
+      <div class="zone-row" id="zone-row-2">
+        <div class="zone library" id="lib-zone-2" data-player="2" data-zone="library"
+             onclick="openZoneModal(1,'library')" data-tooltip="Library">
+          <span class="card-count" id="lib-count-2">0</span>
+          <span class="zone-icon">&#x1F4DA;</span>
+          <span class="zone-name">Library</span>
+        </div>
+        <div class="zone exile" id="exile-zone-2" data-player="2" data-zone="exile"
+             onclick="openZoneModal(1,'exile')" data-tooltip="Exile">
+          <span class="card-count" id="exile-count-2" style="display:none;">0</span>
+          <span class="zone-icon">&#x2B21;</span>
+          <span class="zone-name">Exile</span>
+        </div>
+        <div class="zone graveyard" id="gv-zone-2" data-player="2" data-zone="graveyard"
+             onclick="openZoneModal(1,'graveyard')" data-tooltip="Graveyard">
+          <span class="card-count" id="gv-count-2" style="display:none;">0</span>
+          <span class="zone-icon">&#x2620;</span>
+          <span class="zone-name">Grave</span>
+        </div>
+        <div class="zone hand" id="hand-zone-2" data-player="2" data-zone="hand"
+             onclick="openZoneModal(1,'hand')" data-tooltip="Hand">
+          <span class="zone-icon">&#x1F0CF;</span>
+          <span class="zone-name">Hand (<span id="hand-count-2">0</span>)</span>
+        </div>
+      </div>
+
+      <div class="commander-row" id="cmd-row-2">
+        <div class="zone commander" id="cmd-zone-2" data-player="2" data-zone="command"
+             onclick="openZoneModal(1,'command')" data-tooltip="Command Zone">
+          <span class="zone-icon">&#x1F451;</span>
+          <span class="zone-name">Commander</span>
+        </div>
+      </div>
+
+      <div class="battle-zone" id="battle-zone-2">
+        <div class="battle-zone-inner"></div>
+        <span class="battle-zone-label">Battlefield</span>
+      </div>
+    </div>
+
+    <!-- PLAYER 3: Bottom-Left (Emerald) -->
+    <div class="player-area p3" id="player-area-3">
+      <!-- Battle zone on top for bottom players -->
+      <div class="battle-zone" id="battle-zone-3">
+        <div class="battle-zone-inner"></div>
+        <span class="battle-zone-label">Battlefield</span>
+      </div>
+
+      <div class="commander-row" id="cmd-row-3">
+        <div class="zone commander" id="cmd-zone-3" data-player="3" data-zone="command"
+             onclick="openZoneModal(2,'command')" data-tooltip="Command Zone">
+          <span class="zone-icon">&#x1F451;</span>
+          <span class="zone-name">Commander</span>
+        </div>
+      </div>
+
+      <div class="zone-row" id="zone-row-3">
+        <div class="zone library" id="lib-zone-3" data-player="3" data-zone="library"
+             onclick="openZoneModal(2,'library')" data-tooltip="Library">
+          <span class="card-count" id="lib-count-3">0</span>
+          <span class="zone-icon">&#x1F4DA;</span>
+          <span class="zone-name">Library</span>
+        </div>
+        <div class="zone exile" id="exile-zone-3" data-player="3" data-zone="exile"
+             onclick="openZoneModal(2,'exile')" data-tooltip="Exile">
+          <span class="card-count" id="exile-count-3" style="display:none;">0</span>
+          <span class="zone-icon">&#x2B21;</span>
+          <span class="zone-name">Exile</span>
+        </div>
+        <div class="zone graveyard" id="gv-zone-3" data-player="3" data-zone="graveyard"
+             onclick="openZoneModal(2,'graveyard')" data-tooltip="Graveyard">
+          <span class="card-count" id="gv-count-3" style="display:none;">0</span>
+          <span class="zone-icon">&#x2620;</span>
+          <span class="zone-name">Grave</span>
+        </div>
+        <div class="zone hand" id="hand-zone-3" data-player="3" data-zone="hand"
+             onclick="openZoneModal(2,'hand')" data-tooltip="Hand">
+          <span class="zone-icon">&#x1F0CF;</span>
+          <span class="zone-name">Hand (<span id="hand-count-3">0</span>)</span>
+        </div>
+      </div>
+
+      <span class="player-label" id="player-label-3">Player 3</span>
+    </div>
+
+    <!-- PLAYER 4: Bottom-Right (Gold) -->
+    <div class="player-area p4" id="player-area-4">
+      <div class="battle-zone" id="battle-zone-4">
+        <div class="battle-zone-inner"></div>
+        <span class="battle-zone-label">Battlefield</span>
+      </div>
+
+      <div class="commander-row" id="cmd-row-4">
+        <div class="zone commander" id="cmd-zone-4" data-player="4" data-zone="command"
+             onclick="openZoneModal(3,'command')" data-tooltip="Command Zone">
+          <span class="zone-icon">&#x1F451;</span>
+          <span class="zone-name">Commander</span>
+        </div>
+      </div>
+
+      <div class="zone-row" id="zone-row-4">
+        <div class="zone library" id="lib-zone-4" data-player="4" data-zone="library"
+             onclick="openZoneModal(3,'library')" data-tooltip="Library">
+          <span class="card-count" id="lib-count-4">0</span>
+          <span class="zone-icon">&#x1F4DA;</span>
+          <span class="zone-name">Library</span>
+        </div>
+        <div class="zone exile" id="exile-zone-4" data-player="4" data-zone="exile"
+             onclick="openZoneModal(3,'exile')" data-tooltip="Exile">
+          <span class="card-count" id="exile-count-4" style="display:none;">0</span>
+          <span class="zone-icon">&#x2B21;</span>
+          <span class="zone-name">Exile</span>
+        </div>
+        <div class="zone graveyard" id="gv-zone-4" data-player="4" data-zone="graveyard"
+             onclick="openZoneModal(3,'graveyard')" data-tooltip="Graveyard">
+          <span class="card-count" id="gv-count-4" style="display:none;">0</span>
+          <span class="zone-icon">&#x2620;</span>
+          <span class="zone-name">Grave</span>
+        </div>
+        <div class="zone hand" id="hand-zone-4" data-player="4" data-zone="hand"
+             onclick="openZoneModal(3,'hand')" data-tooltip="Hand">
+          <span class="zone-icon">&#x1F0CF;</span>
+          <span class="zone-name">Hand (<span id="hand-count-4">0</span>)</span>
+        </div>
+      </div>
+
+      <span class="player-label" id="player-label-4">Player 4</span>
+    </div>
+
+  </div><!-- /.battlefield -->
+
+  <!-- LIFE PANELS OVERLAY (top-most layer) -->
+  <div id="life-panels-overlay">
+    <div class="life-panel lp-p1" id="life-panel-1">
+      <div class="life-panel-box life-box">
+        <span class="life-panel-label">Life</span>
+        <div class="life-counter" id="life-counter-1">
+          <button onclick="adjustLife(0,-1)" aria-label="Decrease P1 life">&#x2212;</button>
+          <span class="life-counter-value" id="life-0" onclick="showSetLifeDialog(0)">40</span>
+          <button onclick="adjustLife(0,1)" aria-label="Increase P1 life">+</button>
+        </div>
+      </div>
+      <div class="life-panel-box cmd-dmg-box" id="cmd-dmg-inline-0" onclick="openCmdDmgMatrix()" title="Open Commander Damage matrix">
+        <span class="life-panel-label">Cmd Dmg</span>
+        <div class="cmd-dmg-inline-row">&#8212;</div>
+      </div>
+      <div class="life-panel-box counters-box">
+        <span class="life-panel-label">Counters</span>
+        <div class="poison-badge" id="poison-0" onclick="adjustPoison(0,1)" title="Poison counters (click +1, right-click -1)" oncontextmenu="event.preventDefault();adjustPoison(0,-1)">0 poison</div>
+      </div>
+    </div>
+
+    <div class="life-panel lp-p2" id="life-panel-2">
+      <div class="life-panel-box life-box">
+        <span class="life-panel-label">Life</span>
+        <div class="life-counter" id="life-counter-2">
+          <button onclick="adjustLife(1,-1)" aria-label="Decrease P2 life">&#x2212;</button>
+          <span class="life-counter-value" id="life-1" onclick="showSetLifeDialog(1)">40</span>
+          <button onclick="adjustLife(1,1)" aria-label="Increase P2 life">+</button>
+        </div>
+      </div>
+      <div class="life-panel-box cmd-dmg-box" id="cmd-dmg-inline-1" onclick="openCmdDmgMatrix()" title="Open Commander Damage matrix">
+        <span class="life-panel-label">Cmd Dmg</span>
+        <div class="cmd-dmg-inline-row">&#8212;</div>
+      </div>
+      <div class="life-panel-box counters-box">
+        <span class="life-panel-label">Counters</span>
+        <div class="poison-badge" id="poison-1" onclick="adjustPoison(1,1)" oncontextmenu="event.preventDefault();adjustPoison(1,-1)">0 poison</div>
+      </div>
+    </div>
+
+    <div class="life-panel lp-p3" id="life-panel-3">
+      <div class="life-panel-box life-box">
+        <span class="life-panel-label">Life</span>
+        <div class="life-counter" id="life-counter-3">
+          <button onclick="adjustLife(2,-1)" aria-label="Decrease P3 life">&#x2212;</button>
+          <span class="life-counter-value" id="life-2" onclick="showSetLifeDialog(2)">40</span>
+          <button onclick="adjustLife(2,1)" aria-label="Increase P3 life">+</button>
+        </div>
+      </div>
+      <div class="life-panel-box cmd-dmg-box" id="cmd-dmg-inline-2" onclick="openCmdDmgMatrix()" title="Open Commander Damage matrix">
+        <span class="life-panel-label">Cmd Dmg</span>
+        <div class="cmd-dmg-inline-row">&#8212;</div>
+      </div>
+      <div class="life-panel-box counters-box">
+        <span class="life-panel-label">Counters</span>
+        <div class="poison-badge" id="poison-2" onclick="adjustPoison(2,1)" oncontextmenu="event.preventDefault();adjustPoison(2,-1)">0 poison</div>
+      </div>
+    </div>
+
+    <div class="life-panel lp-p4" id="life-panel-4">
+      <div class="life-panel-box life-box">
+        <span class="life-panel-label">Life</span>
+        <div class="life-counter" id="life-counter-4">
+          <button onclick="adjustLife(3,-1)" aria-label="Decrease P4 life">&#x2212;</button>
+          <span class="life-counter-value" id="life-3" onclick="showSetLifeDialog(3)">40</span>
+          <button onclick="adjustLife(3,1)" aria-label="Increase P4 life">+</button>
+        </div>
+      </div>
+      <div class="life-panel-box cmd-dmg-box" id="cmd-dmg-inline-3" onclick="openCmdDmgMatrix()" title="Open Commander Damage matrix">
+        <span class="life-panel-label">Cmd Dmg</span>
+        <div class="cmd-dmg-inline-row">&#8212;</div>
+      </div>
+      <div class="life-panel-box counters-box">
+        <span class="life-panel-label">Counters</span>
+        <div class="poison-badge" id="poison-3" onclick="adjustPoison(3,1)" oncontextmenu="event.preventDefault();adjustPoison(3,-1)">0 poison</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMBAT SVG OVERLAY (arrows) -->
+  <svg id="combat-overlay" xmlns="http://www.w3.org/2000/svg" style="position:absolute;inset:44px 0 0 0;pointer-events:none;z-index:30;">
+    <defs>
+      <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="rgba(211,32,42,0.7)"/>
+      </marker>
+    </defs>
+    <g id="combat-arrows-svg"></g>
+  </svg>
+
+  <!-- FLOATING LOG -->
+  <div id="floating-log" class="floating-log"></div>
+
+  <!-- SHORTCUT HINT -->
+  <div class="shortcut-hint"></div>
+
+  <!-- CARD SEARCH SIDEBAR (right side, collapsible) -->
+  <div id="card-search-sidebar" class="collapsed">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Card Search</span>
+      <button class="sidebar-toggle" onclick="document.getElementById('card-search-sidebar').classList.toggle('collapsed')" title="Close search">&#x2715;</button>
+    </div>
+    <div class="search-input-wrap">
+      <input class="search-input" id="card-search-input" type="text" placeholder="Search Scryfall..." autocomplete="off"/>
+    </div>
+    <div class="search-status" id="search-status">Type to search cards...</div>
+    <div class="card-results" id="card-results"></div>
+  </div>
+
+  <!-- Sidebar edge tab -->
+  <div id="sidebar-edge-tab" class="sidebar-edge-tab" title="Toggle card search">&#x2039;</div>
+
+  <!-- LEFT ACTION PANEL (triggers + quick actions) -->
+  <div id="left-action-panel" class="collapsed">
+    <div class="left-panel-header">
+      <span class="left-panel-title">Triggers <span id="left-panel-trigger-count" class="left-panel-count">0</span></span>
+      <button class="sidebar-toggle" onclick="toggleLeftPanel()" title="Close panel">&#x2715;</button>
+    </div>
+    <div class="left-panel-actions">
+      <button class="left-panel-btn" onclick="openTokenModal((typeof gameState !== 'undefined' && gameState) ? (gameState.currentPlayerIndex || 0) : 0)" title="Create token">&#x2728; Create Token</button>
+      <button class="left-panel-btn" onclick="autoArrangeBattlefield()" title="Auto-arrange battlefield">&#x21C4; Auto-Arrange</button>
+    </div>
+    <div class="left-panel-body" id="left-panel-triggers">
+      <div class="left-panel-empty">No pending triggers.</div>
+    </div>
+  </div>
+
+  <!-- Left panel edge tab -->
+  <div id="left-panel-edge-tab" class="left-panel-edge-tab" onclick="toggleLeftPanel()" title="Toggle quick actions">&#x203A;</div>
+
+</div><!-- /.table-surface / #game-battlefield -->
+
+<!-- ====================================================
+     CONTEXT MENU
+     ==================================================== -->
+<div id="context-menu"></div>
+
+<!-- ====================================================
+     FLOATING CARD PREVIEW
+     ==================================================== -->
+<div id="card-preview">
+  <img src="" alt="Card Preview"/>
+  <div class="card-preview-pt-overlay" id="card-preview-pt-overlay"></div>
+  <div class="card-preview-info">
+    <div class="card-preview-name"></div>
+    <div class="card-preview-type"></div>
+    <div class="card-preview-oracle"></div>
+    <div class="card-preview-pt"></div>
+  </div>
+</div>
+
+<!-- ====================================================
+     ZONE MODAL
+     ==================================================== -->
+<div id="zone-modal">
+  <div class="zone-modal-card">
+    <div class="zone-modal-header">
+      <span class="zone-modal-title" id="zone-modal-title">Player Zones</span>
+      <button class="btn-close" onclick="closeZoneModal()">&#x2715;</button>
+    </div>
+    <div class="zone-modal-tabs" id="zone-modal-tabs">
+      <!-- Populated by renderZoneModal() -->
+    </div>
+    <div class="zone-modal-body" id="zone-modal-body">
+      <!-- Populated by renderZoneModal() -->
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================
+     DICE MODAL
+     ==================================================== -->
+<div id="dice-modal">
+  <div class="dice-modal-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+      <span style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.08em;">Dice &amp; Coins</span>
+      <button class="btn-close" onclick="closeDiceModal()">&#x2715;</button>
+    </div>
+    <div class="dice-result-display" id="dice-result-display">&#x2014;</div>
+    <div class="dice-label" id="dice-label">Choose a die</div>
+    <div class="dice-buttons">
+      <button class="btn-dice" onclick="rollDice(4)">d4</button>
+      <button class="btn-dice" onclick="rollDice(6)">d6</button>
+      <button class="btn-dice" onclick="rollDice(8)">d8</button>
+      <button class="btn-dice" onclick="rollDice(10)">d10</button>
+      <button class="btn-dice" onclick="rollDice(12)">d12</button>
+      <button class="btn-dice" onclick="rollDice(20)">d20</button>
+      <button class="btn-dice" onclick="rollDice(100)">d100</button>
+      <button class="btn-dice coin" onclick="flipCoin()">Coin Flip</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================
+     TOKEN MODAL
+     ==================================================== -->
+<div id="token-modal">
+  <div class="token-modal-card">
+    <div class="modal-header">
+      <span class="modal-title">Create Token</span>
+      <button class="btn-close" onclick="closeTokenModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="token-modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--color-text);display:block;margin-bottom:4px;">Token Name</label>
+          <input class="game-input" id="token-name" type="text" placeholder="e.g. 1/1 White Soldier"/>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--color-text);display:block;margin-bottom:4px;">Type Line</label>
+          <input class="game-input" id="token-type" type="text" placeholder="Creature — Soldier"/>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--color-text);display:block;margin-bottom:4px;">Power/Toughness</label>
+          <input class="game-input" id="token-pt" type="text" placeholder="1/1"/>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--color-text);display:block;margin-bottom:4px;">Count</label>
+          <input class="game-input" id="token-count" type="number" value="1" min="1" max="20"/>
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label style="font-size:11px;font-weight:600;color:var(--color-text);display:block;margin-bottom:4px;">Keywords (comma-separated)</label>
+        <input class="game-input" id="token-keywords" type="text" placeholder="Flying, Vigilance"/>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;font-weight:600;color:var(--color-text);display:block;margin-bottom:4px;">Player</label>
+        <select class="game-input" id="token-player-select" style="height:28px;">
+          <option value="0">Player 1</option>
+          <option value="1">Player 2</option>
+          <option value="2">Player 3</option>
+          <option value="3">Player 4</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" onclick="createTokenFromModal()">Create Token(s)</button>
+        <button class="btn btn-cancel" onclick="closeTokenModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================
+     DECK MODAL
+     ==================================================== -->
+<div id="deck-modal">
+  <div class="deck-modal-card">
+    <div class="modal-header">
+      <span class="modal-title">Deck Manager</span>
+      <button class="btn-close" onclick="closeDeckModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="deck-modal-body">
+      <!-- Populated by renderDeckModalContent() -->
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================
+     COMMANDER DAMAGE MATRIX MODAL
+     ==================================================== -->
+<div id="cmd-dmg-matrix-modal">
+  <!-- Populated by renderCmdDmgMatrix() -->
+</div>
+
+<!-- ====================================================
+     TRIGGER STACK PANEL
+     ==================================================== -->
+<div id="trigger-stack-panel">
+  <div class="trigger-stack-card">
+    <div class="trigger-stack-header">
+      <span class="trigger-stack-title">Trigger Stack</span>
+      <button class="btn-close" style="font-size:14px;width:20px;height:20px;" onclick="closeTriggerStack()">&#x2715;</button>
+    </div>
+    <div class="trigger-stack-body" id="trigger-stack-body">
+      <div class="trigger-stack-empty">No pending triggers.</div>
+    </div>
+    <div class="trigger-stack-actions">
+      <button class="btn-resolve" onclick="resolveNextTrigger()">Resolve Next</button>
+      <button class="btn-resolve-all" onclick="resolveAllTriggers()">Resolve All</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================
+     SETTINGS PANEL
+     ==================================================== -->
+<div id="settings-panel">
+  <div class="modal-header" style="flex-shrink:0;">
+    <span class="modal-title">Settings</span>
+    <button class="btn-close" onclick="toggleSettingsPanel()">&#x2715;</button>
+  </div>
+  <div class="settings-body" id="settings-body" style="flex:1;overflow-y:auto;padding:12px;">
+    <!-- Populated by renderSettingsPanel() -->
+  </div>
+  <div style="padding:10px 14px;border-top:1px solid var(--color-border);display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0;">
+    <button class="btn btn-primary" onclick="openDiceModal()">&#x1F3B2; Dice</button>
+    <button class="btn btn-gold" onclick="openCmdDmgMatrix()">CMD Damage Matrix</button>
+    <button class="btn btn-cancel" onclick="checkStateBasedActions()">Check SBA</button>
+    <button class="btn btn-cancel" onclick="autoArrangeBattlefield()">Auto-Arrange</button>
+  </div>
+</div>
+
+<!-- ====================================================
+     PRIORITY BANNER
+     ==================================================== -->
+<div id="priority-banner">
+  <span class="priority-text" id="priority-text">Waiting for priority...</span>
+  <button class="btn-priority-pass" onclick="passPriority()">Pass Priority</button>
+  <button class="btn-close" style="font-size:13px;" onclick="closePriorityWindow()">&#x2715;</button>
+</div>
+
+<!-- ====================================================
+     LEGAL ACTIONS BAR
+     ==================================================== -->
+<div id="legal-actions-bar">
+  <!-- Populated by renderLegalActionsBar() -->
+</div>
+
+<!-- ====================================================
+     UNDO HISTORY PANEL
+     ==================================================== -->
+<div id="undo-history-panel">
+  <!-- Populated by renderUndoHistory() -->
+</div>
+
+<!-- ====================================================
+     MANA COLOR PICKER (dynamically appended) -->
+<!-- Zone card context menu (dynamically appended) -->
+<!-- SBA alert panel (dynamically appended) -->
+<!-- Set-life dialog (dynamically appended) -->
+
+<!-- ====================================================
+     SCRIPTS
+     Load order matters:
+       1. precons.js      — static PRECON_DATA fallback
+       2. engine.js       — game state & core logic
+       3. ai-bridge.js    — backend connector & DeckSourceClient
+       4. precon-loader.js — startGameWithDecks() + loadPreconDeckFromDck()
+       5. player-panels.js — player panel rendering
+       6. ui.js           — setup screen, deck picker, UI wiring
+     ==================================================== -->
+<script src="precons.js?v=20260403_0300"></script>
+<script src="engine.js?v=20260403_0300"></script>
+<script src="ai-bridge.js?v=20260403_0300"></script>
+<script src="precon-loader.js?v=20260403_0300"></script>
+<script src="player-panels.js?v=20260403_0300"></script>
+<script src="ui.js?v=20260403_0300"></script>
+
+<script>
+// ============================================================
+// STARTUP & BRIDGE FUNCTIONS
+// ============================================================
+
+// Token creation from modal
+function createTokenFromModal() {
+  if (!gameState) return;
+  const name = document.getElementById('token-name').value.trim() || '1/1 Token';
+  const typeLine = document.getElementById('token-type').value.trim() || 'Creature';
+  const pt = document.getElementById('token-pt').value.trim() || '1/1';
+  const count = parseInt(document.getElementById('token-count').value) || 1;
+  const keywords = document.getElementById('token-keywords').value.trim();
+  const playerIdx = parseInt(document.getElementById('token-player-select').value) || 0;
+
+  const parts = pt.split('/');
+  const power = parts[0] ? parts[0].trim() : '1';
+  const toughness = parts[1] ? parts[1].trim() : '1';
+
+  for (let i = 0; i < count; i++) {
+    addCardToBattlefield(name, '', typeLine, playerIdx, undefined, undefined,
+      keywords ? keywords.replace(/,/g, ' ') : '',
+      { power, toughness, pt, isToken: true });
+  }
+  addLogEntry('Created ' + count + 'x <strong>' + name + '</strong> token(s) for Player ' + (playerIdx + 1));
+  closeTokenModal();
+}
+
+// Pass priority
+function passPriority() {
+  addLogEntry('Priority passed.');
+  closePriorityWindow();
+}
+
+// Open precon browser (stub - opens deck modal for current player)
+function openPreconBrowser() {
+  if (gameState) openDeckModal(gameState.currentPlayerIndex);
+}
+
+// Open collection modal (stub)
+function openCollectionModal() { showToast('Collection tracker available in full version.'); }
+
+// Scry dialog stub
+function showScryDialog(playerId) {
+  if (!gameState) return;
+  const player = gameState.players[playerId];
+  if (!player || player.zones.library.length === 0) {
+    addLogEntry('!! ' + (player ? player.name : 'Player') + ' has no cards to scry.');
+    return;
+  }
+  const count = Math.min(parseInt(prompt('Scry how many? (1-7)', '1') || '1'), 7, player.zones.library.length);
+  if (isNaN(count) || count < 1) return;
+  const topCards = player.zones.library.slice(0, count);
+  const names = topCards.map(c => c.name || '?').join(', ');
+  addLogEntry('<strong>' + player.name + '</strong> scrys ' + count + ': [' + names + ']');
+}
+
+// Mill dialog stub
+function showMillDialog(playerId) {
+  if (!gameState) return;
+  const count = parseInt(prompt('Mill how many cards?', '1') || '1');
+  if (isNaN(count) || count < 1) return;
+  millCards(playerId, count);
+}
+
+// Become monarch
+function becomeMonarch(playerId) {
+  if (!gameState) return;
+  gameState.monarchPlayerIndex = playerId;
+  const player = gameState.players[playerId];
+  addLogEntry('&#x1F451; <strong>' + (player ? player.name : 'Player') + '</strong> becomes the Monarch!');
+  updateMonarchBadges();
+}
+
+// Empower the life counter right-click on the quadrant labels
+document.addEventListener('DOMContentLoaded', function() {
+  // Wire right-click on life values to set-life dialog
+  for (var i = 0; i < 4; i++) {
+    (function(idx) {
+      var lifeEl = document.getElementById('life-' + idx);
+      if (lifeEl) {
+        lifeEl.addEventListener('contextmenu', function(e) {
+          e.preventDefault();
+          showSetLifeDialog(idx);
+        });
+      }
+    })(i);
+  }
+
+  // Life counter right-click on quadrant buttons too
+  // (already handled via inline onclick in HTML)
+
+  // Auto-detect Commander-AI-Lab backend on page load
+  if (typeof AIBridge !== 'undefined') {
+    AIBridge.init().then(function(status) {
+      var indicator = document.getElementById('backend-status-indicator');
+      if (indicator) {
+        indicator.textContent = status.connected
+          ? (status.modelLoaded ? '\u{1F9E0} ML Backend Connected' : '\u26a1 Backend Connected (no ML model)')
+          : '\u{1F4E1} Local Mode (no backend)';
+        indicator.className = 'backend-status ' +
+          (status.connected ? (status.modelLoaded ? 'connected-ml' : 'connected') : 'disconnected');
+      }
+
+      // Wire up WebSocket push events from backend
+      AIBridge.connector.on('ai:decision', function(msg) {
+        if (!gameState || !msg.action) return;
+        var playerIdx = gameState.currentPlayerIndex;
+        var player = gameState.players[playerIdx];
+        if (player && player.isAI) {
+          AIBridge.MacroActionMapper.execute(msg.action, playerIdx, gameState, msg);
+        }
+      });
+
+      AIBridge.connector.on('state:snapshot', function(msg) {
+        if (typeof AI_BRIDGE_CONFIG !== 'undefined' && AI_BRIDGE_CONFIG.verbose) {
+          console.log('[WS] State snapshot received from backend');
+        }
+      });
+    });
+  }
+});
+</script>
+
+<!-- ====================================================
+     DECK BUILDER PANEL (iframe)
+     ==================================================== -->
+<div id="panel-deckbuilder" class="fullscreen-panel hidden">
+  <div class="fullscreen-panel-header">
+    <span>Deck Builder</span>
+    <button class="btn-util" onclick="toggleDeckBuilderPanel()" title="Close">&times;</button>
+  </div>
+  <iframe src="deckbuilder.html"
+          style="width:100%;height:calc(100vh - 36px);border:none;"
+          id="deckbuilder-iframe">
+  </iframe>
+</div>
+
+<div id="panel-collection" class="fullscreen-panel hidden">
+  <div class="fullscreen-panel-header">
+    <span>Collection</span>
+    <button class="btn-util" onclick="toggleCollectionPanel()" title="Close">&times;</button>
+  </div>
+  <iframe src="collection.html"
+          style="width:100%;height:calc(100vh - 36px);border:none;"
+          id="collection-iframe">
+  </iframe>
+</div>
+
+<div id="panel-deckgenerator" class="fullscreen-panel hidden">
+  <div class="fullscreen-panel-header">
+    <span>Auto Deck Generator</span>
+    <button class="btn-util" onclick="toggleDeckGenPanel()" title="Close">&times;</button>
+  </div>
+  <iframe src="deckgenerator.html"
+          style="width:100%;height:calc(100vh - 36px);border:none;"
+          id="deckgenerator-iframe">
+  </iframe>
+</div>
+
+<script>
+function toggleDeckBuilderPanel() {
+  var panel = document.getElementById('panel-deckbuilder');
+  if (panel) panel.classList.toggle('hidden');
+}
+
+function toggleDeckGenPanel() {
+  var panel = document.getElementById('panel-deckgenerator');
+  if (panel) panel.classList.toggle('hidden');
+}
+
+function toggleCollectionPanel() {
+  var panel = document.getElementById('panel-collection');
+  if (panel) panel.classList.toggle('hidden');
+}
+
+function toggleLeftPanel() {
+  var panel = document.getElementById('left-action-panel');
+  if (panel) {
+    panel.classList.toggle('collapsed');
+    if (!panel.classList.contains('collapsed') && typeof refreshLeftPanelTriggers === 'function') {
+      refreshLeftPanelTriggers();
+    }
+  }
+}
+
+// Render the triggers list inside the left action panel.
+// Mirrors #trigger-stack-body rendering but stays embedded in the panel.
+function refreshLeftPanelTriggers() {
+  var body = document.getElementById('left-panel-triggers');
+  var countEl = document.getElementById('left-panel-trigger-count');
+  if (!body) return;
+  if (typeof gameState === 'undefined' || !gameState) {
+    if (countEl) countEl.textContent = '0';
+    body.innerHTML = '<div class="left-panel-empty">No pending triggers.</div>';
+    return;
+  }
+  var pending = (gameState.triggerStack || []).filter(function(t){ return !t.resolved; });
+  if (countEl) countEl.textContent = String(pending.length);
+  if (pending.length === 0) {
+    body.innerHTML = '<div class="left-panel-empty">No pending triggers.</div>';
+    return;
+  }
+  var icons = (typeof TRIGGER_TYPE_ICONS !== 'undefined') ? TRIGGER_TYPE_ICONS : {};
+  var labels = (typeof TRIGGER_TYPE_LABELS !== 'undefined') ? TRIGGER_TYPE_LABELS : {};
+  var html = '';
+  pending.forEach(function(t) {
+    var icon = icons[t.type] || '\u2747';
+    var label = labels[t.type] || t.type || '';
+    var owner = (gameState.players && gameState.players[t.ownerIndex]) || {};
+    var color = owner.color || '#888';
+    var name = (t.cardName || 'Unknown').replace(/</g,'&lt;');
+    var snip = (t.oracleSnippet || '').replace(/</g,'&lt;');
+    html +=
+      '<div class="lpt-item">' +
+        '<div class="lpt-icon">' + icon + '</div>' +
+        '<div class="lpt-body">' +
+          '<div class="lpt-title">' + name + '</div>' +
+          '<div class="lpt-type">' + label + '</div>' +
+          '<div class="lpt-text">' + snip + '</div>' +
+        '</div>' +
+        '<div class="lpt-dot" style="background:' + color + '"></div>' +
+        '<button class="lpt-dismiss" title="Dismiss" onclick="if(typeof dismissTrigger===\'function\')dismissTrigger(' + t.id + ');refreshLeftPanelTriggers();">&#x2715;</button>' +
+      '</div>';
+  });
+  body.innerHTML = html;
+}
+
+// Populate each seat's Cmd Dmg score-area box with per-opponent badges.
+// Skips the seat's own player number from the display.
+function renderCmdDmgInline() {
+  if (typeof gameState === 'undefined' || !gameState || !gameState.players) return;
+  var players = gameState.players;
+  for (var i = 0; i < players.length; i++) {
+    var box = document.getElementById('cmd-dmg-inline-' + i);
+    if (!box) continue;
+    var row = box.querySelector('.cmd-dmg-inline-row');
+    if (!row) continue;
+    var me = players[i];
+    if (!me) continue;
+    var html = '';
+    for (var j = 0; j < players.length; j++) {
+      if (j === i) continue;  // leave own player number out
+      var op = players[j];
+      if (!op) continue;
+      var dmg = (me.commanderDamage && me.commanderDamage[op.id]) || 0;
+      var danger = dmg >= 21 ? ' danger' : dmg >= 15 ? ' crit' : dmg >= 8 ? ' warn' : '';
+      html +=
+        '<span class="cdi-badge' + danger + '" title="Commander damage from ' + (op.name||'P'+(j+1)) + '">' +
+          '<span class="cdi-dot" style="background:' + (op.color||'#888') + '"></span>' +
+          'P' + (j + 1) + ' <b>' + dmg + '</b>' +
+        '</span>';
+    }
+    row.innerHTML = html || '&#8212;';
+  }
+}
+
+// Hook into the trigger-stack badge updater so the left panel stays in sync.
+(function() {
+  if (typeof window === 'undefined') return;
+  var tryHook = function() {
+    if (typeof window.updateTriggerBadge === 'function' && !window.updateTriggerBadge._leftPanelHooked) {
+      var orig = window.updateTriggerBadge;
+      window.updateTriggerBadge = function() {
+        var r = orig.apply(this, arguments);
+        try { refreshLeftPanelTriggers(); } catch(e) {}
+        return r;
+      };
+      window.updateTriggerBadge._leftPanelHooked = true;
+    }
+    // Also wrap adjustCommanderDamage so badges refresh after matrix clicks.
+    if (typeof window.adjustCommanderDamage === 'function' && !window.adjustCommanderDamage._cdmInlineHooked) {
+      var origAdj = window.adjustCommanderDamage;
+      window.adjustCommanderDamage = function() {
+        var r = origAdj.apply(this, arguments);
+        try { renderCmdDmgInline(); } catch(e) {}
+        return r;
+      };
+      window.adjustCommanderDamage._cdmInlineHooked = true;
+    }
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tryHook);
+  } else {
+    tryHook();
+  }
+  // Also attempt the hook again a tick later (engine.js loads after this script in some orderings)
+  setTimeout(tryHook, 0);
+  setTimeout(tryHook, 500);
+})();
+
+// Listen for deck exports from the deck builder iframe
+window.addEventListener('message', function(e) {
+  if (!e.data || e.data.type !== 'DECK_BUILDER_EXPORT') return;
+
+  var deckData = e.data;
+  // Build a decklist text string compatible with importDeckForPlayer()
+  var lines = [];
+  var commanders = deckData.deck.filter(function(c) { return c.is_commander; });
+  var nonCmd = deckData.deck.filter(function(c) { return !c.is_commander; });
+
+  if (commanders.length > 0) {
+    lines.push('[Commander]');
+    commanders.forEach(function(c) { lines.push('1 ' + c.name); });
+    lines.push('');
+  }
+  lines.push('[Deck]');
+  nonCmd.forEach(function(c) { lines.push((c.quantity || 1) + ' ' + c.name); });
+
+  // Store on window for the setup screen to pick up
+  window._pendingDeckImport = {
+    text: lines.join('\n'),
+    deckName: deckData.deckName || 'Imported Deck',
+    commander: deckData.commander || '',
+  };
+
+  // If a game is in progress, import into current player's slot
+  if (typeof gameState !== 'undefined' && gameState && typeof importDeckForPlayer === 'function') {
+    var playerIdx = gameState.currentPlayerIndex || 0;
+    importDeckForPlayer(playerIdx, window._pendingDeckImport.text).then(function() {
+      if (typeof renderHandArea === 'function') renderHandArea();
+      if (typeof renderPlayerPanels === 'function') renderPlayerPanels();
+      if (typeof addLogEntry === 'function') {
+        addLogEntry('Imported deck "' + window._pendingDeckImport.deckName + '" from Deck Builder');
+      }
+    });
+  } else if (typeof addLogEntry === 'function') {
+    addLogEntry('Deck "' + window._pendingDeckImport.deckName + '" ready — start a game to use it.');
+  }
+
+  // Close the deck builder panel
+  toggleDeckBuilderPanel();
+});
+</script>
+
+</body>
+</html>

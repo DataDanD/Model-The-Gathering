@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Commander AI Lab — Deck Coach</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="global.css" />
+    <link rel="stylesheet" href="coach.css" />
+</head>
+<body>
+    <script src="nav.js"></script>
+    <div class="page">
+        <div class="page-header">
+            <h1>Deck Coach</h1>
+            <p>LLM-powered deck analysis, multi-turn coaching chat, and card discovery</p>
+        </div>
+
+        <!-- Status Bar -->
+        <section class="panel coach-status-bar" id="coach-status-bar">
+            <div class="coach-status-items">
+                <div class="coach-status-item" id="status-llm">
+                    <span class="status-dot status-unknown"></span>
+                    <span class="status-label">Claude Opus</span>
+                    <span class="status-value" id="status-llm-value">Checking...</span>
+                </div>
+                <div class="coach-status-item" id="status-embeddings">
+                    <span class="status-dot status-unknown"></span>
+                    <span class="status-label">Embeddings</span>
+                    <span class="status-value" id="status-embeddings-value">Checking...</span>
+                </div>
+                <div class="coach-status-item" id="status-reports">
+                    <span class="status-dot status-unknown"></span>
+                    <span class="status-label">Deck Reports</span>
+                    <span class="status-value" id="status-reports-value">Checking...</span>
+                </div>
+                <button id="generate-reports-btn" class="btn btn-purple btn-sm coach-gen-btn" style="display:none;" title="Build deck reports from simulation results">
+                    Generate Reports
+                </button>
+            </div>
+        </section>
+
+        <!-- Config Panel -->
+        <section class="panel coach-config">
+            <div class="panel-header">
+                <h2>Coaching Session</h2>
+            </div>
+            <div class="coach-config-grid">
+                <!-- Deck Selector -->
+                <div class="form-group coach-field-wide">
+                    <label class="form-label" for="coach-deck-select">Deck</label>
+                    <select id="coach-deck-select" class="form-select">
+                        <option value="">-- Select a deck --</option>
+                    </select>
+                </div>
+
+                <!-- Power Level Slider -->
+                <div class="form-group">
+                    <label class="form-label" for="coach-power-level">
+                        Target Power Level
+                        <span class="tip-icon tip-below" data-tip="Guides the LLM on how competitive suggestions should be. 1-3 = casual jank; 4-6 = upgraded precon; 7-8 = high power; 9-10 = cEDH with fast mana and infinite combos.">?</span>
+                    </label>
+                    <div class="coach-slider-row">
+                        <input type="range" id="coach-power-level" min="1" max="10" value="7" />
+                        <span class="coach-slider-value" id="coach-power-value">7</span>
+                    </div>
+                    <span class="coach-hint">1 = casual jank &middot; 10 = cEDH</span>
+                </div>
+
+                <!-- Meta Focus -->
+                <div class="form-group">
+                    <label class="form-label" for="coach-meta-focus">
+                        Meta Focus
+                        <span class="tip-icon tip-below" data-tip="The game plan the coach optimizes for. Aggro = fast damage; Control = answers and card advantage; Combo = tutors and win-con protection; Stax = slow everyone down.">?</span>
+                    </label>
+                    <select id="coach-meta-focus" class="form-select">
+                        <option value="">Any / Balanced</option>
+                        <option value="aggro">Aggro</option>
+                        <option value="midrange">Midrange</option>
+                        <option value="control">Control</option>
+                        <option value="combo">Combo</option>
+                        <option value="stax">Stax</option>
+                    </select>
+                </div>
+
+                <!-- Budget -->
+                <div class="form-group">
+                    <label class="form-label" for="coach-budget">
+                        Budget
+                        <span class="tip-icon tip-below" data-tip="Restricts suggestions to cards within a price range. Budget caps cards at ~$2 each; Medium at ~$10. No Limit allows any card including Reserved List staples.">?</span>
+                    </label>
+                    <select id="coach-budget" class="form-select">
+                        <option value="">No Limit</option>
+                        <option value="budget">Budget (&lt; $2 per card)</option>
+                        <option value="medium">Medium (&lt; $10 per card)</option>
+                        <option value="no-limit">No Limit</option>
+                    </select>
+                </div>
+
+                <!-- Focus Areas -->
+                <div class="form-group coach-field-wide">
+                    <label class="form-label">
+                        Focus Areas (optional)
+                        <span class="tip-icon tip-below" data-tip="Narrows the coach to specific deck categories. Leaving all unchecked triggers a full-deck general analysis across all categories.">?</span>
+                    </label>
+                    <div class="coach-focus-tags">
+                        <label class="coach-tag"><input type="checkbox" value="ramp" /> Ramp</label>
+                        <label class="coach-tag"><input type="checkbox" value="card draw" /> Card Draw</label>
+                        <label class="coach-tag"><input type="checkbox" value="removal" /> Removal</label>
+                        <label class="coach-tag"><input type="checkbox" value="board wipes" /> Board Wipes</label>
+                        <label class="coach-tag"><input type="checkbox" value="mana base" /> Mana Base</label>
+                        <label class="coach-tag"><input type="checkbox" value="win conditions" /> Win Cons</label>
+                        <label class="coach-tag"><input type="checkbox" value="protection" /> Protection</label>
+                        <label class="coach-tag"><input type="checkbox" value="recursion" /> Recursion</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons Row -->
+            <div class="coach-run-row">
+                <button id="coach-quick-btn" class="btn btn-secondary" disabled>&#9889; Quick Digest</button>
+                <button id="coach-run-btn" class="btn btn-primary" disabled>&#128300; Full Analysis</button>
+                <span class="coach-run-hint" id="coach-run-hint">Select a deck to begin</span>
+            </div>
+
+            <!-- Progress -->
+            <div id="coach-progress" class="coach-progress" style="display:none;">
+                <div class="spinner"></div>
+                <span id="coach-progress-text">Analyzing deck and consulting LLM...</span>
+            </div>
+        </section>
+
+        <!-- Multi-turn Chat Panel -->
+        <section class="panel coach-chat-section" id="coach-chat-section">
+            <div class="panel-header coach-chat-header">
+                <h2>Chat with Coach</h2>
+                <div class="coach-chat-actions">
+                    <button id="coach-chat-clear" class="btn btn-ghost btn-sm" title="Clear chat history">Clear Chat</button>
+                </div>
+            </div>
+            <div class="coach-chat-messages" id="coach-chat-messages">
+                <div class="coach-chat-welcome">
+                    <div class="coach-chat-welcome-icon">&#129302;</div>
+                    <p>Select a deck above and ask me anything about your strategy, card choices, or upgrades.</p>
+                </div>
+            </div>
+            <div class="coach-chat-input-row">
+                <textarea id="coach-chat-input" class="coach-chat-input" placeholder="Ask the coach a question..." rows="2"></textarea>
+                <button id="coach-chat-send" class="btn btn-primary coach-chat-send-btn" disabled>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+                </button>
+            </div>
+        </section>
+
+        <!-- Cards-Like Search Panel -->
+        <section class="panel coach-cardslike-section" id="coach-cardslike-section">
+            <div class="panel-header coach-panel-collapsible" id="cardslike-header">
+                <h2>Find Similar Cards</h2>
+                <span class="coach-collapse-arrow" id="cardslike-arrow">&#9660;</span>
+            </div>
+            <div class="coach-cardslike-body" id="cardslike-body">
+                <div class="coach-cardslike-controls">
+                    <div class="form-group coach-cardslike-name-group">
+                        <input type="text" id="cardslike-input" class="form-input" placeholder="Enter a card name (e.g. Sol Ring)" autocomplete="off" />
+                    </div>
+                    <div class="coach-cardslike-filters">
+                        <div class="coach-cardslike-colors">
+                            <button class="coach-color-pip coach-pip-W" data-color="W" title="White">W</button>
+                            <button class="coach-color-pip coach-pip-U" data-color="U" title="Blue">U</button>
+                            <button class="coach-color-pip coach-pip-B" data-color="B" title="Black">B</button>
+                            <button class="coach-color-pip coach-pip-R" data-color="R" title="Red">R</button>
+                            <button class="coach-color-pip coach-pip-G" data-color="G" title="Green">G</button>
+                        </div>
+                        <div class="form-group coach-cardslike-topn">
+                            <label class="form-label">
+                                Results
+                                <span class="tip-icon tip-below" data-tip="How many similar cards to return. Uses vector embeddings to find cards with the most semantically similar oracle text and mechanics to your query card.">?</span>
+                            </label>
+                            <input type="number" id="cardslike-topn" class="form-input" value="10" min="1" max="50" />
+                        </div>
+                        <button id="cardslike-search-btn" class="btn btn-accent btn-sm">Search</button>
+                    </div>
+                </div>
+                <div class="coach-cardslike-results" id="cardslike-results"></div>
+            </div>
+        </section>
+
+        <!-- One-Shot Results Section -->
+        <section id="coach-results" class="coach-results" style="display:none;">
+
+            <!-- Apply Suggestions Bar -->
+            <div class="panel coach-apply-bar" id="coach-apply-bar">
+                <div class="coach-apply-info">
+                    <span id="coach-apply-count">0 cuts, 0 adds selected</span>
+                </div>
+                <div class="coach-apply-actions">
+                    <select id="coach-apply-deck-select" class="form-select coach-apply-deck-sel">
+                        <option value="">-- Apply to DB Deck --</option>
+                    </select>
+                    <button id="coach-apply-btn" class="btn btn-success btn-sm" disabled>
+                        Apply Suggestions
+                    </button>
+                </div>
+            </div>
+
+            <!-- Top Priority Swap (Phase 2 UI) -->
+            <div id="coach-top-priority" class="coach-card" style="display:none; border-left: 4px solid var(--accent);">
+                <h3>&#9889; Top Priority Swap</h3>
+                <div id="coach-top-priority-content"></div>
+            </div>
+
+            <!-- Summary Card -->
+            <div class="panel" id="coach-summary-card">
+                <div class="panel-header">
+                    <h2>Coach Summary</h2>
+                </div>
+                <p id="coach-summary-text" class="coach-summary-text"></p>
+                <div class="coach-meta-row" id="coach-meta-row"></div>
+            </div>
+
+            <!-- Suggested Cuts -->
+            <div class="panel" id="coach-cuts-card">
+                <div class="panel-header">
+                    <h2>Suggested Cuts <span class="coach-badge" id="coach-cuts-count">0</span></h2>
+                </div>
+                <p class="coach-card-hint">Cards the coach recommends removing from your deck</p>
+                <div class="coach-table-wrap">
+                    <table class="data-table coach-table" id="coach-cuts-table">
+                        <thead>
+                            <tr>
+                                <th class="coach-th-check"><input type="checkbox" id="coach-cuts-all" /></th>
+                                <th>Card</th>
+                                <th>Reason</th>
+                                <th>Replacements</th>
+                                <th>Impact</th>
+                            </tr>
+                        </thead>
+                        <tbody id="coach-cuts-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Suggested Adds -->
+            <div class="panel" id="coach-adds-card">
+                <div class="panel-header">
+                    <h2>Suggested Adds <span class="coach-badge coach-badge-green" id="coach-adds-count">0</span></h2>
+                </div>
+                <p class="coach-card-hint">Cards the coach recommends adding to your deck</p>
+                <div class="coach-table-wrap">
+                    <table class="data-table coach-table" id="coach-adds-table">
+                        <thead>
+                            <tr>
+                                <th class="coach-th-check"><input type="checkbox" id="coach-adds-all" /></th>
+                                <th>Card</th>
+                                <th>Role</th>
+                                <th>Reason</th>
+                                <th>Synergy With</th>
+                            </tr>
+                        </thead>
+                        <tbody id="coach-adds-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Heuristic Hints -->
+            <div class="panel" id="coach-hints-card" style="display:none;">
+                <div class="panel-header">
+                    <h2>Hints &amp; Tips</h2>
+                </div>
+                <ul id="coach-hints-list" class="coach-hints-list"></ul>
+            </div>
+
+            <!-- Mana Base Advice -->
+            <div class="panel" id="coach-mana-card" style="display:none;">
+                <div class="panel-header">
+                    <h2>Mana Base Advice</h2>
+                </div>
+                <p id="coach-mana-text" class="coach-mana-text"></p>
+            </div>
+
+            <!-- Raw Explanation (collapsible) -->
+            <details class="panel coach-raw-details">
+                <summary>Full LLM Response</summary>
+                <pre id="coach-raw-text" class="coach-raw-text"></pre>
+            </details>
+        </section>
+
+        <!-- Past Sessions -->
+        <section class="panel coach-sessions-section">
+            <div class="panel-header">
+                <h2>Past Sessions</h2>
+            </div>
+            <div id="coach-sessions-list" class="coach-sessions-list">
+                <p class="coach-empty">No coaching sessions yet. Run the coach to get started.</p>
+            </div>
+        </section>
+
+        <!-- Toast Container -->
+        <div class="coach-toast-container" id="coach-toast-container"></div>
+    </div>
+
+    <script src="coach.js"></script>
+</body>
+</html>

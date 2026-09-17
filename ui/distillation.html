@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Commander AI Lab — Distillation Loop</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="global.css" />
+    <link rel="stylesheet" href="distillation.css" />
+</head>
+<body>
+    <script src="nav.js"></script>
+    <div class="page">
+        <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <div>
+                <h1>Closed-Loop Distillation</h1>
+                <p>Iterative supervised &rarr; PPO &rarr; quality gate &rarr; merge pipeline</p>
+            </div>
+            <button id="btn-refresh" class="btn btn-secondary" onclick="refreshAll()" title="Refresh status">
+                <span class="btn-icon" id="refresh-icon">&#8635;</span> Refresh
+            </button>
+        </div>
+
+        <!-- Status Overview Cards -->
+        <div class="status-grid stat-grid">
+            <div class="status-card stat-card" id="card-status">
+                <div class="card-icon">&#128260;</div>
+                <div class="card-label stat-label">Status</div>
+                <div class="card-value stat-value" id="val-status">Idle</div>
+                <div class="card-sub stat-sub" id="sub-status">not running</div>
+            </div>
+            <div class="status-card stat-card" id="card-generation">
+                <div class="card-icon">&#128200;</div>
+                <div class="card-label stat-label">Generation</div>
+                <div class="card-value stat-value" id="val-generation">--</div>
+                <div class="card-sub stat-sub" id="sub-generation">of --</div>
+            </div>
+            <div class="status-card stat-card" id="card-winrate">
+                <div class="card-icon">&#127942;</div>
+                <div class="card-label stat-label">Best Win Rate</div>
+                <div class="card-value stat-value" id="val-winrate">--</div>
+                <div class="card-sub stat-sub" id="sub-winrate">across all generations</div>
+            </div>
+            <div class="status-card stat-card" id="card-passed">
+                <div class="card-icon">&#9989;</div>
+                <div class="card-label stat-label">Passed</div>
+                <div class="card-value stat-value" id="val-passed">--</div>
+                <div class="card-sub stat-sub" id="sub-passed">quality gate passes</div>
+            </div>
+        </div>
+
+        <!-- Distillation Controls Panel -->
+        <section class="panel" id="control-panel">
+            <div class="panel-header">
+                <h2>Distillation Controls</h2>
+            </div>
+            <div class="train-controls">
+                <div class="param-grid form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="param-iterations">
+                            Max Generations
+                            <span class="tip-icon" data-tip="How many distillation cycles to run. Each cycle: supervised train &rarr; PPO fine-tune &rarr; quality gate. Stops early if convergence is detected.">?</span>
+                        </label>
+                        <input type="number" id="param-iterations" class="form-input" value="10" min="1" max="100" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-conv-window">
+                            Convergence Window
+                            <span class="tip-icon" data-tip="Number of recent generations to check for plateau. If ELO gain stays below threshold across this many gens, training stops early to save time.">?</span>
+                        </label>
+                        <input type="number" id="param-conv-window" class="form-input" value="3" min="2" max="10" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-sup-epochs">
+                            Supervised Epochs
+                            <span class="tip-icon" data-tip="Training epochs for the supervised step each generation. Fewer is fine since each cycle trains on incrementally better data. 30 is a solid starting point.">?</span>
+                        </label>
+                        <input type="number" id="param-sup-epochs" class="form-input" value="30" min="5" max="200" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-sup-lr">
+                            Supervised LR
+                            <span class="tip-icon" data-tip="Learning rate for the supervised phase. 0.001 is a solid default. Lower it in later generations if the model is already strong.">?</span>
+                        </label>
+                        <input type="number" id="param-sup-lr" class="form-input" value="0.001" step="0.0001" min="0.00001" max="0.1" />
+                    </div>
+                </div>
+                <div class="param-grid form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="param-ppo-iters">
+                            PPO Iterations
+                            <span class="tip-icon" data-tip="Number of PPO update steps per generation. Each step samples game episodes, computes advantages, and updates policy weights.">?</span>
+                        </label>
+                        <input type="number" id="param-ppo-iters" class="form-input" value="50" min="10" max="500" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-ppo-episodes">
+                            PPO Episodes/Iter
+                            <span class="tip-icon" data-tip="Game simulations per PPO update step. More episodes = more stable gradients but slower iterations. 64 balances speed and stability well.">?</span>
+                        </label>
+                        <input type="number" id="param-ppo-episodes" class="form-input" value="64" min="8" max="512" step="8" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-ppo-lr">
+                            PPO Learning Rate
+                            <span class="tip-icon" data-tip="PPO step size. Keep this lower than the supervised LR. 0.0003 is the standard RL default and works well here.">?</span>
+                        </label>
+                        <input type="number" id="param-ppo-lr" class="form-input" value="0.0003" step="0.0001" min="0.00001" max="0.01" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-min-wr">
+                            Min Win Rate Gate
+                            <span class="tip-icon" data-tip="Quality gate threshold. A generation must beat the heuristic opponent at this win rate to be accepted and merged into the next cycle. 0.30 is a lenient starting gate.">?</span>
+                        </label>
+                        <input type="number" id="param-min-wr" class="form-input" value="0.30" step="0.05" min="0.1" max="0.9" />
+                    </div>
+                </div>
+                <div class="param-grid form-row distill-bottom-params">
+                    <div class="form-group">
+                        <label class="form-label" for="param-opponent">
+                            Opponent
+                            <span class="tip-icon" data-tip="Who the agent trains against during PPO. Heuristic is recommended for a consistent challenge. Self-play can become unstable without a strong supervised baseline first.">?</span>
+                        </label>
+                        <select id="param-opponent" class="form-select">
+                            <option value="heuristic">Heuristic</option>
+                            <option value="random">Random</option>
+                            <option value="self">Self-Play</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="param-playstyle">
+                            Playstyle
+                            <span class="tip-icon" data-tip="Deck archetype used for simulations in this distillation run. Midrange is the most balanced test bed. Match this to the archetype you want the model to master.">?</span>
+                        </label>
+                        <select id="param-playstyle" class="form-select">
+                            <option value="midrange">Midrange</option>
+                            <option value="aggro">Aggro</option>
+                            <option value="control">Control</option>
+                            <option value="combo">Combo</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="train-actions distill-actions">
+                    <button id="btn-start" class="btn btn-primary" onclick="startDistillation()">
+                        <span class="btn-icon">&#9654;</span> Start Distillation
+                    </button>
+                    <button id="btn-stop" class="btn btn-danger" onclick="stopDistillation()" disabled>
+                        <span class="btn-icon">&#9632;</span> Stop
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress Section (hidden when idle) -->
+            <div id="distill-progress" class="train-progress hidden">
+                <div class="progress-header">
+                    <span id="progress-phase" class="phase-badge">IDLE</span>
+                    <span id="progress-message">Waiting...</span>
+                </div>
+                <div class="progress-bar-container progress-track">
+                    <div class="progress-bar progress-fill" id="progress-bar"></div>
+                </div>
+                <div class="progress-detail" id="progress-detail"></div>
+            </div>
+        </section>
+
+        <!-- Win Rate Trend Chart -->
+        <section class="panel" id="chart-panel">
+            <div class="panel-header">
+                <h2>Win Rate Trend</h2>
+            </div>
+            <div id="winrate-chart" class="chart-container">
+                <canvas id="winrate-canvas"></canvas>
+                <div id="winrate-empty" class="empty-state">
+                    <p>No generation data yet. Start a distillation run to see win rate trends.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Data Composition Chart -->
+        <section class="panel" id="composition-panel">
+            <div class="panel-header">
+                <h2>Data Composition</h2>
+            </div>
+            <div id="composition-chart" class="chart-container">
+                <canvas id="composition-canvas"></canvas>
+                <div id="composition-empty" class="empty-state">
+                    <p>No generation data yet.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ELO Rating Chart -->
+        <section class="panel" id="elo-panel">
+            <div class="panel-header elo-panel-header">
+                <h2>ELO Ratings
+                    <span class="tip-icon tip-below" data-tip="ELO scores measure relative strength. Baseline is 1200. Scores above that mean the model wins more than it loses. Tournament runs the top 10 most recent checkpoints head-to-head.">?</span>
+                </h2>
+                <button id="btn-run-elo" class="btn btn-sm btn-secondary" onclick="runEloTournament()">
+                    <span class="btn-icon">&#127942;</span> Run Tournament
+                </button>
+            </div>
+            <div id="elo-chart" class="chart-container">
+                <canvas id="elo-canvas"></canvas>
+                <div id="elo-empty" class="empty-state">
+                    <p>No ELO data yet. Run a tournament or enable ELO tracking in distillation settings.</p>
+                </div>
+            </div>
+            <div id="elo-progress" class="train-progress hidden">
+                <div class="progress-header">
+                    <span id="elo-progress-phase" class="phase-badge running">RUNNING</span>
+                    <span id="elo-progress-message">Running ELO tournament...</span>
+                </div>
+                <div class="progress-bar-container progress-track">
+                    <div class="progress-bar progress-fill" id="elo-progress-bar" style="width:50%"></div>
+                </div>
+            </div>
+            <div id="elo-leaderboard" class="mt-4"></div>
+        </section>
+
+        <!-- Generation History Table -->
+        <section class="panel" id="history-panel">
+            <div class="panel-header">
+                <h2>Generation History</h2>
+            </div>
+            <div id="history-table-container">
+                <div class="empty-state" id="history-empty">No generations completed yet.</div>
+            </div>
+        </section>
+    </div>
+
+    <script src="distillation.js"></script>
+</body>
+</html>

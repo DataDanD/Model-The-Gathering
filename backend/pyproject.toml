@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.31.0,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mtg-agentic-deck-builder-api"
+version = "0.1.0"
+description = "FastAPI backend for MAGE, the local-first agentic Commander deck builder."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastapi>=0.139.2,<0.140",
+    "fastembed>=0.8,<0.9",
+    "ijson>=3.4,<4",
+    "numpy>=2.4,<3",
+    "pydantic-settings>=2.14.2,<3",
+    "pyyaml>=6.0.3,<7",
+    "rapidfuzz>=3.14.3,<4",
+    "uvicorn[standard]>=0.51.0,<0.52",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.8.0,<3",
+    "pytest>=9.1.1,<10",
+    "ruff>=0.15.22,<0.16",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mtg_deck_builder"]
+
+[tool.pytest.ini_options]
+addopts = ["-ra", "--strict-config", "--strict-markers", "-m", "not live"]
+testpaths = ["tests"]
+markers = [
+  # Contract checks against the real third-party endpoints the site adapters read.
+  # Excluded by default: they need the network and can fail for reasons that are not
+  # this repository's fault. Run them with `pytest -m live` after touching an adapter,
+  # because every other test in the suite stubs the transport and so cannot notice a
+  # site changing shape underneath us.
+  "live: talks to a real third-party endpoint",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
