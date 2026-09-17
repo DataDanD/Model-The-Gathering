@@ -10,7 +10,7 @@ The active vertical slice provides:
 
 - lightweight Commander deck models and text parsing
 - bundled real 100-card Commander deck fixtures in `decks/`
-- a cached local Scryfall Oracle Cards bulk-data provider for deck validation
+- a cached local Scryfall Default Cards bulk-data provider for deck validation
 - an optional live Scryfall exact-name provider for one-off card lookups
 - Commander validation for deck size, commander eligibility, legality, singleton rules, and color identity
 - stable deck fingerprints for experiment tracking
@@ -68,7 +68,9 @@ Validate one with the local Scryfall bulk catalog:
 python scripts/validate_deck.py decks/goreclaw.txt
 ```
 
-On the first run, Model the Gathering fetches Scryfall's Oracle Cards bulk-data metadata once and downloads the static catalog to `data/scryfall/oracle-cards.json`. Later validations reuse that local file instead of performing one live API request per card.
+On the first run, Model the Gathering fetches Scryfall's Default Cards bulk-data metadata once and downloads the compressed static catalog to `data/scryfall/default-cards.jsonl.gz`. That first download/index can take a little while. Later validations reuse the local catalog instead of performing one live API request per card.
+
+Default Cards is used instead of the one-record-per-Oracle-ID export because Commander legality is printing-level data. When duplicate printings share a name, the local index prefers a printing that reports Commander legality. Multi-face cards are also indexed by individual face names, so entries such as `Bala Ged Recovery` resolve to `Bala Ged Recovery // Bala Ged Sanctuary`.
 
 Force a fresh catalog download:
 
