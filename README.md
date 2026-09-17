@@ -10,7 +10,8 @@ The active vertical slice provides:
 
 - lightweight Commander deck models and text parsing
 - bundled real 100-card Commander deck fixtures in `decks/`
-- Scryfall-backed exact-name card lookup with caching and polite request throttling
+- a cached local Scryfall Oracle Cards bulk-data provider for deck validation
+- an optional live Scryfall exact-name provider for one-off card lookups
 - Commander validation for deck size, commander eligibility, legality, singleton rules, and color identity
 - stable deck fingerprints for experiment tracking
 - a `PlayerPolicy` interface for heuristic, LLM, and learned pilots
@@ -61,10 +62,24 @@ decks/goreclaw.txt
 decks/talrand.txt
 ```
 
-Validate one against live Scryfall data:
+Validate one with the local Scryfall bulk catalog:
 
 ```bash
 python scripts/validate_deck.py decks/goreclaw.txt
+```
+
+On the first run, Model the Gathering fetches Scryfall's Oracle Cards bulk-data metadata once and downloads the static catalog to `data/scryfall/oracle-cards.json`. Later validations reuse that local file instead of performing one live API request per card.
+
+Force a fresh catalog download:
+
+```bash
+python scripts/validate_deck.py decks/goreclaw.txt --refresh
+```
+
+The old per-card live API behavior is still available for debugging or one-off checks:
+
+```bash
+python scripts/validate_deck.py decks/goreclaw.txt --live
 ```
 
 The validator currently checks:
@@ -78,17 +93,28 @@ The validator currently checks:
 
 Two-card command zones are intentionally conservative in this version: both cards are resolved and their color identities are combined, but Partner, Background, Doctor's companion, and other compatibility rules are not yet fully modeled.
 
-## Scryfall provider
+## Scryfall providers
+
+For repeated deck validation, use the bulk provider:
+
+```python
+from llmtg.cards import BulkScryfallProvider
+
+provider = BulkScryfallProvider.synced()
+card = provider.get_card("Rhystic Study")
+print(card.type_line, card.color_identity)
+```
+
+For one-off live lookups:
 
 ```python
 from llmtg.cards import ScryfallProvider
 
 provider = ScryfallProvider()
 card = provider.get_card("Rhystic Study")
-print(card.type_line, card.color_identity)
 ```
 
-The live provider caches repeated lookups and spaces requests to remain below Scryfall's requested API rate. For large card-catalog workloads, the planned next step is a local bulk-data provider behind the same `CardProvider` interface.
+The live provider caches repeated lookups, but high-volume validation should use bulk data rather than repeated requests to `api.scryfall.com`.
 
 ## Run an experiment
 
@@ -142,12 +168,11 @@ The database stores an experiment header plus every game's ordered deck and poli
 ## Next milestones
 
 1. Implement a Forge-backed `SimulationEngine` adapter.
-2. Add a local Scryfall bulk-data catalog for high-volume card resolution.
-3. Fully model multi-card Commander eligibility rules such as Partner and Background.
-4. Add matchup/meta sampling and richer experiment queries.
-5. Add an LLM deck-scientist that proposes mutations for A/B testing.
-6. Add stronger player policies and policy-vs-policy evaluation.
-7. Add learned policies and self-play datasets.
+2. Fully model multi-card Commander eligibility rules such as Partner and Background.
+3. Add matchup/meta sampling and richer experiment queries.
+4. Add an LLM deck-scientist that proposes mutations for A/B testing.
+5. Add stronger player policies and policy-vs-policy evaluation.
+6. Add learned policies and self-play datasets.
 
 ## Archive
 
