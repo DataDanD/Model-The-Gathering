@@ -9,6 +9,8 @@ dist/
 build/
 *.egg-info/
 .env
+*.sqlite
+*.sqlite3
 .DS_Store
 .vscode/
 .idea/
